@@ -183,7 +183,16 @@ func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	folders, err := s.folderTree(ctx, ws.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	var selected int64
+	if id := formID(r, "folder"); id != nil {
+		selected = *id
+	}
 	s.render(w, "workspace.html", map[string]any{
-		"User": user, "Workspace": ws, "Workspaces": workspaces,
+		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "FolderID": selected,
 	})
 }
