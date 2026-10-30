@@ -64,8 +64,82 @@
       {{end}}
     </ul>
   </aside>
-  {{block "workspace_body" .}}
-  <section class="flex flex-1 items-center justify-center text-stone-400">Nothing here yet.</section>
+  <section class="flex w-72 shrink-0 flex-col border-r border-stone-200 bg-white">
+    <div class="flex items-center border-b border-stone-200 px-4 py-3">
+      <span class="font-semibold">Notes</span>
+      {{if .Workspace.CanEdit}}
+      <form method="post" action="/w/{{.Workspace.ID}}/notes" class="ml-auto">
+        {{if .FolderID}}<input type="hidden" name="folder_id" value="{{.FolderID}}">{{end}}
+        <button class="rounded bg-stone-900 px-2.5 py-1 text-sm text-white hover:bg-stone-700">+ New note</button>
+      </form>
+      {{end}}
+    </div>
+    <ul class="flex-1 divide-y divide-stone-100 overflow-auto">
+      {{range .Notes}}
+      <li>
+        <a href="/w/{{$.Workspace.ID}}?{{if $.FolderID}}folder={{$.FolderID}}&{{end}}note={{.ID}}"
+          class="block px-4 py-3 hover:bg-stone-50 {{if and $.Note (eq .ID $.Note.ID)}}bg-stone-100{{end}}">
+          <div class="truncate font-medium" data-note-title="{{.ID}}">{{or .Title "Untitled"}}</div>
+          <div class="line-clamp-2 text-sm text-stone-500">{{.Snippet}}</div>
+          <div class="mt-1 text-xs text-stone-400">{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}</div>
+        </a>
+      </li>
+      {{else}}
+      <li class="px-4 py-6 text-sm text-stone-400">No notes here.</li>
+      {{end}}
+    </ul>
+  </section>
+
+  {{with .Note}}
+  <section class="flex min-w-0 flex-1 flex-col bg-white">
+    <div class="flex items-center gap-3 border-b border-stone-200 px-6 py-2 text-sm text-stone-500">
+      {{if $.Workspace.CanEdit}}
+      <form method="post" action="/notes/{{.ID}}/move">
+        <select name="folder_id" onchange="this.form.requestSubmit()" class="rounded border border-stone-200 px-2 py-1">
+          <option value="">No folder</option>
+          {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $.Note.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}
+        </select>
+      </form>
+      {{end}}
+      <span>{{with .Author}}by {{.}} · {{end}}updated {{.UpdatedAt.Format "Jan 2, 2006 15:04"}}</span>
+      <span id="save-status" class="ml-auto"></span>
+      {{if $.Workspace.CanEdit}}
+      <form method="post" action="/notes/{{.ID}}/delete" hx-confirm="Delete this note?">
+        <button class="rounded px-2 py-1 text-red-600 hover:bg-red-50">Delete</button>
+      </form>
+      {{end}}
+    </div>
+    <div class="flex-1 overflow-auto">
+      <div class="mx-auto max-w-3xl px-6 py-8">
+        <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not $.Workspace.CanEdit}}readonly{{end}}
+          class="mb-4 w-full text-3xl font-bold outline-none placeholder:text-stone-300">
+        {{if $.Workspace.CanEdit}}
+        <div id="toolbar" class="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-1 border-y border-stone-100 bg-white py-1 text-sm">
+          <button data-cmd="bold" class="rounded px-2 py-1 font-bold hover:bg-stone-100">B</button>
+          <button data-cmd="italic" class="rounded px-2 py-1 italic hover:bg-stone-100">I</button>
+          <button data-cmd="strike" class="rounded px-2 py-1 line-through hover:bg-stone-100">S</button>
+          <button data-cmd="code" class="rounded px-2 py-1 font-mono hover:bg-stone-100">`</button>
+          <span class="mx-1 h-5 w-px bg-stone-200"></span>
+          <button data-cmd="h1" class="rounded px-2 py-1 hover:bg-stone-100">H1</button>
+          <button data-cmd="h2" class="rounded px-2 py-1 hover:bg-stone-100">H2</button>
+          <button data-cmd="h3" class="rounded px-2 py-1 hover:bg-stone-100">H3</button>
+          <span class="mx-1 h-5 w-px bg-stone-200"></span>
+          <button data-cmd="bullet" class="rounded px-2 py-1 hover:bg-stone-100">• List</button>
+          <button data-cmd="ordered" class="rounded px-2 py-1 hover:bg-stone-100">1. List</button>
+          <button data-cmd="task" class="rounded px-2 py-1 hover:bg-stone-100">☑ Tasks</button>
+          <button data-cmd="quote" class="rounded px-2 py-1 hover:bg-stone-100">❝</button>
+          <span class="mx-1 h-5 w-px bg-stone-200"></span>
+          <button data-cmd="codeblock" class="rounded px-2 py-1 font-mono hover:bg-stone-100">{ }</button>
+          <select id="code-language" class="rounded border border-stone-200 px-1 py-0.5 text-xs"><option value="">auto</option></select>
+        </div>
+        {{end}}
+        <div id="editor" class="prose prose-stone max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
+          data-editable="{{$.Workspace.CanEdit}}"></div>
+      </div>
+    </div>
+  </section>
+  {{else}}
+  <section class="flex flex-1 items-center justify-center bg-white text-stone-400">Select or create a note.</section>
   {{end}}
 </div>
 {{end}}

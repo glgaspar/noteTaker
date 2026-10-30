@@ -6,10 +6,18 @@
     "watch:css": "tailwindcss -i web/app.css -o static/dist/app.css --watch"
   },
   "dependencies": {
-    "htmx.org": "^2.0.11"
+    "@tiptap/core": "^3.32.2",
+    "@tiptap/extension-code-block-lowlight": "^3.32.2",
+    "@tiptap/extension-list": "^3.32.2",
+    "@tiptap/extensions": "^3.32.2",
+    "@tiptap/starter-kit": "^3.32.2",
+    "highlight.js": "^11.12.0",
+    "htmx.org": "^2.0.11",
+    "lowlight": "^3.3.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/typography": "^0.5.20",
     "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.3"
   }

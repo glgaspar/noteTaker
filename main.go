@@ -95,6 +95,10 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /w/{id}/folders", auth(s.createFolder))
 	mux.Handle("POST /folders/{id}/rename", auth(s.renameFolder))
 	mux.Handle("POST /folders/{id}/delete", auth(s.deleteFolder))
+	mux.Handle("POST /w/{id}/notes", auth(s.createNote))
+	mux.Handle("PUT /notes/{id}", auth(s.saveNote))
+	mux.Handle("POST /notes/{id}/move", auth(s.moveNote))
+	mux.Handle("POST /notes/{id}/delete", auth(s.deleteNote))
 	mux.Handle("GET /admin/users", s.requireAdmin(http.HandlerFunc(s.adminUsers)))
 	mux.Handle("POST /admin/invites", s.requireAdmin(http.HandlerFunc(s.createInvite)))
 

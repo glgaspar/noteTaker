@@ -188,11 +188,19 @@ func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	var selected int64
-	if id := formID(r, "folder"); id != nil {
-		selected = *id
+	folderID := orZero(formID(r, "folder"))
+	notes, err := s.noteList(ctx, ws.ID, folderID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	n, err := s.loadNote(ctx, ws.ID, orZero(formID(r, "note")))
+	if err != nil {
+		serverError(w, err)
+		return
 	}
 	s.render(w, "workspace.html", map[string]any{
-		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "FolderID": selected,
+		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders,
+		"FolderID": folderID, "Notes": notes, "Note": n,
 	})
 }
