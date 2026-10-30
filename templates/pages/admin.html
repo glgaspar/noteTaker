@@ -1,0 +1,36 @@
+{{define "content"}}
+<h1 class="mb-6 text-2xl font-semibold">Users</h1>
+
+<form method="post" action="/admin/invites" class="mb-8 flex gap-2">
+  <input name="email" type="email" placeholder="email@example.com" required
+    class="w-72 rounded border border-stone-300 px-3 py-2">
+  <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Send invite</button>
+</form>
+{{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
+{{with .Notice}}<p class="mb-4 rounded bg-green-50 px-3 py-2 text-sm text-green-700">{{.}}</p>{{end}}
+
+<table class="w-full overflow-hidden rounded-lg border border-stone-200 bg-white text-sm">
+  <thead class="bg-stone-100 text-left text-stone-600">
+    <tr><th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="px-4 py-2">Role</th><th class="px-4 py-2">Joined</th></tr>
+  </thead>
+  <tbody>
+    {{range .Users}}
+    <tr class="border-t border-stone-100">
+      <td class="px-4 py-2">{{.Name}}</td>
+      <td class="px-4 py-2">{{.Email}}</td>
+      <td class="px-4 py-2">{{if .IsAdmin}}Admin{{else}}User{{end}}</td>
+      <td class="px-4 py-2">{{.CreatedAt.Format "2006-01-02"}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+
+{{if .Invites}}
+<h2 class="mb-3 mt-8 text-lg font-semibold">Pending invites</h2>
+<ul class="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white text-sm">
+  {{range .Invites}}
+  <li class="flex px-4 py-2"><span>{{.Email}}</span><span class="ml-auto text-stone-500">expires {{.ExpiresAt.Format "2006-01-02"}}</span></li>
+  {{end}}
+</ul>
+{{end}}
+{{end}}

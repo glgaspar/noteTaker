@@ -1,0 +1,27 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoteTaker</title>
+  <link rel="stylesheet" href="/static/dist/app.css">
+  <script src="/static/dist/app.js" defer></script>
+</head>
+<body class="min-h-screen bg-stone-50 text-stone-900" hx-boost="true">
+  {{with .User}}
+  <header class="border-b border-stone-200 bg-white">
+    <nav class="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
+      <a href="/" class="font-semibold">NoteTaker</a>
+      {{if .IsAdmin}}<a href="/admin/users" class="text-sm text-stone-600 hover:text-stone-900">Users</a>{{end}}
+      <span class="ml-auto text-sm text-stone-500">{{.Name}}</span>
+      <form method="post" action="/logout">
+        <button class="text-sm text-stone-600 hover:text-stone-900">Log out</button>
+      </form>
+    </nav>
+  </header>
+  {{end}}
+  <main class="mx-auto max-w-5xl px-4 py-8">
+    {{template "content" .}}
+  </main>
+</body>
+</html>{{end}}

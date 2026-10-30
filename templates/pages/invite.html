@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="mx-auto mt-16 max-w-sm rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+  {{if .Invalid}}
+  <h1 class="mb-2 text-xl font-semibold">Invite not found</h1>
+  <p class="text-sm text-stone-600">This invite is invalid or has expired. Ask an admin for a new one.</p>
+  {{else}}
+  <h1 class="mb-1 text-xl font-semibold">Create your account</h1>
+  <p class="mb-6 text-sm text-stone-600">{{.Email}}</p>
+  {{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
+  <form method="post" action="/invite/{{.Token}}" class="space-y-4">
+    <label class="block text-sm">Name
+      <input name="name" value="{{.Name}}" required autofocus
+        class="mt-1 w-full rounded border border-stone-300 px-3 py-2">
+    </label>
+    <label class="block text-sm">Password
+      <input name="password" type="password" minlength="8" required
+        class="mt-1 w-full rounded border border-stone-300 px-3 py-2">
+    </label>
+    <button class="w-full rounded bg-stone-900 px-3 py-2 text-white hover:bg-stone-700">Create account</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

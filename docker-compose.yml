@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: notetaker
+      POSTGRES_PASSWORD: notetaker
+      POSTGRES_DB: notetaker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:

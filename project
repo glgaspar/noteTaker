@@ -1,0 +1,25 @@
+affine/evernote clone
+
+this is supposed to be a project inspired on both affine and evernote
+for now, lets keep it as only a web app.
+
+stack
+- go
+- htmx
+- tailwind
+- postgresql
+- s3 (rustfs) - not necesary, but will be available if we need to store files
+
+
+main features we need
+- multiple users
+- only admin can create user by email invite
+- workspaces
+  - folders
+  - tags
+  - support for writting code, with syntax highlight
+  - autosync/autosave
+  - deal with multiple users editing single file simultaneously (i still dont know how to)
+  - capacity to share workspaces or folders
+  - file import (enex, html, md, txt)
+  - file search by folder, tag, title, author, timestamp, words in text
