@@ -15,8 +15,11 @@ htmx.onLoad((root) => {
 
 // Save pending changes before htmx navigates away, and before the page unloads.
 document.addEventListener("htmx:beforeRequest", () => editor?.flush(false));
-document.addEventListener("htmx:beforeSwap", () => {
-  editor?.destroy();
-  editor = null;
+document.addEventListener("htmx:beforeSwap", (e) => {
+  // partial swaps (e.g. the tag bar) leave the editor in place
+  if (editor && e.detail.target.contains(editor.el)) {
+    editor.destroy();
+    editor = null;
+  }
 });
 window.addEventListener("pagehide", () => editor?.flush(true));

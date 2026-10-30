@@ -32,6 +32,13 @@ func (s *server) render(w http.ResponseWriter, name string, data any) {
 	}
 }
 
+func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl[page].ExecuteTemplate(w, name, data); err != nil {
+		log.Printf("render %s/%s: %v", page, name, err)
+	}
+}
+
 func serverError(w http.ResponseWriter, err error) {
 	log.Print(err)
 	http.Error(w, "internal server error", http.StatusInternalServerError)

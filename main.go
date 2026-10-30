@@ -99,6 +99,8 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("PUT /notes/{id}", auth(s.saveNote))
 	mux.Handle("POST /notes/{id}/move", auth(s.moveNote))
 	mux.Handle("POST /notes/{id}/delete", auth(s.deleteNote))
+	mux.Handle("POST /notes/{id}/tags", auth(s.addTag))
+	mux.Handle("POST /notes/{id}/tags/{tag}/delete", auth(s.removeTag))
 	mux.Handle("GET /admin/users", s.requireAdmin(http.HandlerFunc(s.adminUsers)))
 	mux.Handle("POST /admin/invites", s.requireAdmin(http.HandlerFunc(s.createInvite)))
 

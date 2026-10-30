@@ -101,6 +101,7 @@ export function mountEditor(el) {
   }
 
   return {
+    el,
     flush: (keepalive) => timer && save(keepalive),
     destroy: () => editor.destroy(),
   };

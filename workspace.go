@@ -189,7 +189,8 @@ func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	folderID := orZero(formID(r, "folder"))
-	notes, err := s.noteList(ctx, ws.ID, folderID)
+	tagID := orZero(formID(r, "tag"))
+	notes, err := s.noteList(ctx, ws.ID, folderID, tagID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -199,8 +200,20 @@ func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	tags, err := s.workspaceTags(ctx, ws.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	var nt noteTags
+	if n != nil {
+		if nt, err = s.noteTags(ctx, n.ID, ws.CanEdit()); err != nil {
+			serverError(w, err)
+			return
+		}
+	}
 	s.render(w, "workspace.html", map[string]any{
-		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders,
-		"FolderID": folderID, "Notes": notes, "Note": n,
+		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
+		"FolderID": folderID, "TagID": tagID, "Notes": notes, "Note": n, "NoteTags": nt,
 	})
 }

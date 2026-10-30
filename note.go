@@ -50,12 +50,13 @@ func workspaceURL(wsID, folderID, noteID int64) string {
 	return u
 }
 
-// noteList lists notes of a workspace, optionally only those directly inside a folder.
-func (s *server) noteList(ctx context.Context, wsID, folderID int64) ([]noteItem, error) {
+// noteList lists notes of a workspace, optionally only those directly inside a folder or with a tag.
+func (s *server) noteList(ctx context.Context, wsID, folderID, tagID int64) ([]noteItem, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, title, left(content_text, 120), updated_at FROM notes
+		SELECT id, title, left(content_text, 120), updated_at FROM notes n
 		WHERE workspace_id = $1 AND ($2 = 0 OR folder_id = $2)
-		ORDER BY updated_at DESC`, wsID, folderID)
+		AND ($3 = 0 OR EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = $3))
+		ORDER BY updated_at DESC`, wsID, folderID, tagID)
 	if err != nil {
 		return nil, err
 	}
