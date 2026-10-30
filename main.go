@@ -26,6 +26,7 @@ type server struct {
 	baseURL string
 	secure  bool
 	smtp    smtpConfig
+	hub     hub
 }
 
 func env(key, fallback string) string {
@@ -97,6 +98,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /folders/{id}/delete", auth(s.deleteFolder))
 	mux.Handle("POST /w/{id}/notes", auth(s.createNote))
 	mux.Handle("PUT /notes/{id}", auth(s.saveNote))
+	mux.Handle("GET /notes/{id}/ws", auth(s.noteSocket))
 	mux.Handle("POST /notes/{id}/move", auth(s.moveNote))
 	mux.Handle("POST /notes/{id}/delete", auth(s.deleteNote))
 	mux.Handle("POST /notes/{id}/tags", auth(s.addTag))

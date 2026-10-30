@@ -3,9 +3,15 @@ import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
+import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import { common, createLowlight } from "lowlight";
+import * as Y from "yjs";
+import { NoteProvider } from "./collab.js";
 
 const lowlight = createLowlight(common);
+
+const colors = ["#e11d48", "#2563eb", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#db2777", "#65a30d"];
 
 const commands = {
   bold: (c) => c.toggleBold(),
@@ -22,29 +28,60 @@ const commands = {
   codeblock: (c) => c.toggleCodeBlock(),
 };
 
-// mountEditor turns #editor into a TipTap editor that autosaves to PUT /notes/{id}.
+// mountEditor turns #editor into a collaborative TipTap editor. The Yjs doc (content and
+// title) syncs live through NoteProvider; local edits are also saved as JSON and plain
+// text to PUT /notes/{id} for listing and search.
 // It returns { flush, destroy } so the page can save pending changes before navigating.
 export function mountEditor(el) {
   const id = el.dataset.noteId;
   const title = document.getElementById("note-title");
   const status = document.getElementById("save-status");
+  const presence = document.getElementById("presence");
   const toolbar = document.getElementById("toolbar");
   const language = document.getElementById("code-language");
   let timer = null;
 
+  const doc = new Y.Doc();
+  const meta = doc.getMap("meta");
+  const provider = new NoteProvider(id, doc, {
+    onSynced: (seed) => {
+      if (!seed) return;
+      const json = JSON.parse(el.dataset.content || "null");
+      if (title.value) meta.set("title", title.value);
+      if (json) editor.commands.setContent(json);
+    },
+    onStatus: (s) => (status.textContent = s === "offline" ? "Offline, reconnecting…" : ""),
+  });
+
   const editor = new Editor({
     element: el,
     editable: el.dataset.editable === "true",
-    content: JSON.parse(el.dataset.content || "null") || "",
     extensions: [
-      StarterKit.configure({ codeBlock: false }),
+      StarterKit.configure({ codeBlock: false, undoRedo: false }),
       CodeBlockLowlight.configure({ lowlight }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: "Start writing…" }),
+      Collaboration.configure({ document: doc }),
+      CollaborationCaret.configure({
+        provider,
+        user: { name: el.dataset.userName, color: colors[el.dataset.userId % colors.length] },
+      }),
     ],
-    onUpdate: schedule,
     onSelectionUpdate: syncLanguage,
+  });
+
+  doc.on("update", (_, origin) => {
+    if (origin !== provider) schedule();
+  });
+  meta.observe((e) => {
+    if (!e.transaction.local) title.value = meta.get("title") ?? "";
+  });
+  provider.awareness.on("change", () => {
+    const names = [...provider.awareness.getStates()]
+      .filter(([clientId, state]) => clientId !== doc.clientID && state.user)
+      .map(([, state]) => state.user.name);
+    presence.textContent = names.length ? `Also here: ${[...new Set(names)].join(", ")}` : "";
   });
 
   function save(keepalive = false) {
@@ -62,7 +99,10 @@ export function mountEditor(el) {
         status.textContent = "Saved";
         document.querySelectorAll(`[data-note-title="${id}"]`).forEach((e) => (e.textContent = title.value || "Untitled"));
       })
-      .catch(() => (status.textContent = "Save failed"));
+      .catch(() => {
+        status.textContent = "Save failed, retrying…";
+        timer = setTimeout(save, 3000);
+      });
   }
 
   function schedule() {
@@ -79,7 +119,7 @@ export function mountEditor(el) {
     language.value = lang;
   }
 
-  title.addEventListener("input", schedule);
+  title.addEventListener("input", () => meta.set("title", title.value));
   title.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -103,6 +143,10 @@ export function mountEditor(el) {
   return {
     el,
     flush: (keepalive) => timer && save(keepalive),
-    destroy: () => editor.destroy(),
+    destroy: () => {
+      editor.destroy();
+      provider.destroy();
+      doc.destroy();
+    },
   };
 }
