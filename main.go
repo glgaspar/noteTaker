@@ -86,7 +86,12 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /logout", s.requireUser(http.HandlerFunc(s.logout)))
 	mux.HandleFunc("GET /invite/{token}", s.invitePage)
 	mux.HandleFunc("POST /invite/{token}", s.acceptInvite)
-	mux.Handle("GET /{$}", s.requireUser(http.HandlerFunc(s.home)))
+	auth := func(h http.HandlerFunc) http.Handler { return s.requireUser(h) }
+	mux.Handle("GET /{$}", auth(s.home))
+	mux.Handle("POST /workspaces", auth(s.createWorkspace))
+	mux.Handle("GET /w/{id}", auth(s.workspacePage))
+	mux.Handle("POST /w/{id}/rename", auth(s.renameWorkspace))
+	mux.Handle("POST /w/{id}/delete", auth(s.deleteWorkspace))
 	mux.Handle("GET /admin/users", s.requireAdmin(http.HandlerFunc(s.adminUsers)))
 	mux.Handle("POST /admin/invites", s.requireAdmin(http.HandlerFunc(s.createInvite)))
 
@@ -98,10 +103,6 @@ func serve(db *pgxpool.Pool) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.ListenAndServe()
-}
-
-func (s *server) home(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "home.html", map[string]any{"User": currentUser(r)})
 }
 
 func createAdmin(ctx context.Context, db *pgxpool.Pool, args []string) error {

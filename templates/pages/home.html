@@ -1,4 +1,11 @@
 {{define "content"}}
-<h1 class="text-2xl font-semibold">Hi, {{.User.Name}}</h1>
-<p class="mt-2 text-stone-600">Workspaces are coming next.</p>
+<div class="mx-auto mt-16 max-w-sm rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+  <h1 class="mb-1 text-xl font-semibold">Hi, {{.User.Name}}</h1>
+  <p class="mb-6 text-sm text-stone-600">Create your first workspace to start taking notes.</p>
+  <form method="post" action="/workspaces" class="flex gap-2">
+    <input name="name" placeholder="Workspace name" required autofocus
+      class="flex-1 rounded border border-stone-300 px-3 py-2">
+    <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Create</button>
+  </form>
+</div>
 {{end}}
