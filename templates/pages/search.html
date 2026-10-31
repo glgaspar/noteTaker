@@ -1,0 +1,52 @@
+{{define "main"}}
+<div class="flex min-h-0 flex-1">
+  {{template "sidebar" .}}
+  <section class="flex min-w-0 flex-1 flex-col bg-white">
+    <form method="get" action="/w/{{.Workspace.ID}}/search" class="space-y-3 border-b border-stone-200 px-6 py-4 text-sm"
+      hx-get="/w/{{.Workspace.ID}}/search" hx-trigger="input delay:300ms, change" hx-target="#results"
+      hx-select="#results" hx-swap="outerHTML" hx-push-url="true">
+      <input name="q" type="search" value="{{.Form.Get "q"}}" placeholder="Words in title or text" autofocus
+        class="w-full rounded border border-stone-300 px-3 py-2 text-base">
+      <div class="flex flex-wrap items-center gap-2">
+        <input name="title" value="{{.Form.Get "title"}}" placeholder="Title contains"
+          class="w-44 rounded border border-stone-300 px-2 py-1">
+        <select name="folder" class="rounded border border-stone-300 px-2 py-1">
+          <option value="">Any folder</option>
+          {{range .Folders}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) ($.Form.Get "folder")}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}
+        </select>
+        <select name="tag" class="rounded border border-stone-300 px-2 py-1">
+          <option value="">Any tag</option>
+          {{range .Tags}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) ($.Form.Get "tag")}}selected{{end}}>#{{.Name}}</option>{{end}}
+        </select>
+        <select name="author" class="rounded border border-stone-300 px-2 py-1">
+          <option value="">Any author</option>
+          {{range .Authors}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) ($.Form.Get "author")}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        <select name="date_field" class="rounded border border-stone-300 px-2 py-1">
+          <option value="updated">Updated</option>
+          <option value="created" {{if eq ($.Form.Get "date_field") "created"}}selected{{end}}>Created</option>
+        </select>
+        <input name="from" type="date" value="{{.Form.Get "from"}}" class="rounded border border-stone-300 px-2 py-1">
+        <span class="text-stone-400">to</span>
+        <input name="to" type="date" value="{{.Form.Get "to"}}" class="rounded border border-stone-300 px-2 py-1">
+        <a href="/w/{{.Workspace.ID}}/search" class="ml-auto text-stone-500 hover:text-stone-900">Clear</a>
+      </div>
+    </form>
+    <ul id="results" class="flex-1 divide-y divide-stone-100 overflow-auto">
+      {{range .Results}}
+      <li>
+        <a href="/w/{{$.Workspace.ID}}?{{if .FolderID}}folder={{.FolderID}}&{{end}}note={{.ID}}" class="block px-6 py-3 hover:bg-stone-50">
+          <div class="font-medium">{{or .Title "Untitled"}}</div>
+          {{if .Snippet}}<div class="mt-0.5 text-sm text-stone-600 [&_mark]:rounded [&_mark]:bg-yellow-200 [&_mark]:px-0.5">{{.Snippet}}</div>{{end}}
+          <div class="mt-1 text-xs text-stone-400">
+            {{with .Folder}}📁 {{.}} · {{end}}{{with .Author}}{{.}} · {{end}}{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}
+          </div>
+        </a>
+      </li>
+      {{else}}
+      <li class="px-6 py-8 text-sm text-stone-400">No notes match.</li>
+      {{end}}
+    </ul>
+  </section>
+</div>
+{{end}}

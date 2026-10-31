@@ -93,6 +93,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("GET /w/{id}", auth(s.workspacePage))
 	mux.Handle("POST /w/{id}/rename", auth(s.renameWorkspace))
 	mux.Handle("POST /w/{id}/delete", auth(s.deleteWorkspace))
+	mux.Handle("GET /w/{id}/search", auth(s.searchPage))
 	mux.Handle("GET /w/{id}/members", auth(s.workspaceMembers))
 	mux.Handle("POST /w/{id}/members", auth(s.addWorkspaceMember))
 	mux.Handle("POST /w/{id}/members/{user}/delete", auth(s.removeWorkspaceMember))

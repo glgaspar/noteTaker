@@ -12,7 +12,7 @@ import (
 //go:embed templates
 var templateFS embed.FS
 
-// parseTemplates pairs each page with the shared layout.
+// parseTemplates pairs each page with the shared layout and partials.
 func parseTemplates() map[string]*template.Template {
 	pages, err := fs.Glob(templateFS, "templates/pages/*.html")
 	if err != nil {
@@ -20,7 +20,7 @@ func parseTemplates() map[string]*template.Template {
 	}
 	m := map[string]*template.Template{}
 	for _, p := range pages {
-		m[path.Base(p)] = template.Must(template.ParseFS(templateFS, "templates/layout.html", p))
+		m[path.Base(p)] = template.Must(template.ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", p))
 	}
 	return m
 }

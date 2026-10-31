@@ -172,42 +172,57 @@ func (s *server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/")
 }
 
-func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
+// sidebar loads the workspace in the {id} path value and the data the sidebar partial needs.
+// On failure it writes the response and returns ok=false.
+func (s *server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	ctx := r.Context()
 	user := currentUser(r)
 	found, err := s.userWorkspaces(ctx, user.ID, pathID(r, "id"))
 	if err != nil {
 		serverError(w, err)
-		return
+		return nil, false
 	}
 	if len(found) == 0 {
 		http.NotFound(w, r)
-		return
+		return nil, false
 	}
 	ws := found[0]
 	workspaces, err := s.userWorkspaces(ctx, user.ID, 0)
 	if err != nil {
 		serverError(w, err)
-		return
+		return nil, false
 	}
 	folders, err := s.folderTree(ctx, ws, user.ID)
 	if err != nil {
 		serverError(w, err)
+		return nil, false
+	}
+	tags, err := s.workspaceTags(ctx, user.ID, ws.ID)
+	if err != nil {
+		serverError(w, err)
+		return nil, false
+	}
+	return map[string]any{
+		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
+		"FolderID": orZero(formID(r, "folder")), "TagID": orZero(formID(r, "tag")),
+	}, true
+}
+
+func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := currentUser(r)
+	data, ok := s.sidebar(w, r)
+	if !ok {
 		return
 	}
-	folderID := orZero(formID(r, "folder"))
-	tagID := orZero(formID(r, "tag"))
+	ws := data["Workspace"].(workspace)
+	folderID, tagID := data["FolderID"].(int64), data["TagID"].(int64)
 	notes, err := s.noteList(ctx, user.ID, ws.ID, folderID, tagID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	n, err := s.loadNote(ctx, user.ID, ws.ID, orZero(formID(r, "note")))
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	tags, err := s.workspaceTags(ctx, user.ID, ws.ID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -221,13 +236,11 @@ func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 	}
 	// New notes go into the selected folder, or the workspace root.
 	canCreate := ws.CanEdit()
-	for _, f := range folders {
+	for _, f := range data["Folders"].([]folder) {
 		if f.ID == folderID {
 			canCreate = f.CanEdit()
 		}
 	}
-	s.render(w, "workspace.html", map[string]any{
-		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
-		"FolderID": folderID, "TagID": tagID, "Notes": notes, "Note": n, "NoteTags": nt, "CanCreate": canCreate,
-	})
+	data["Notes"], data["Note"], data["NoteTags"], data["CanCreate"] = notes, n, nt, canCreate
+	s.render(w, "workspace.html", data)
 }
