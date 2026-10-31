@@ -49,7 +49,28 @@ func (h *hub) room(noteID int64) *room {
 	return h.rooms[noteID]
 }
 
+// kick disconnects all of a user's sockets, e.g. after their access changed.
+// They reconnect with their new role, or are refused.
+func (h *hub) kick(userID int64) {
+	h.mu.Lock()
+	rooms := make([]*room, 0, len(h.rooms))
+	for _, rm := range h.rooms {
+		rooms = append(rooms, rm)
+	}
+	h.mu.Unlock()
+	for _, rm := range rooms {
+		rm.mu.Lock()
+		for c := range rm.clients {
+			if c.userID == userID {
+				rm.drop(c)
+			}
+		}
+		rm.mu.Unlock()
+	}
+}
+
 type client struct {
+	userID    int64
 	send      chan []byte
 	canEdit   bool
 	closed    bool   // guarded by room.mu
@@ -148,6 +169,35 @@ func (rm *room) leave(c *client) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	rm.drop(c)
+	if gone := awarenessGone(c.awareness); gone != nil {
+		rm.broadcast(c, gone)
+	}
+}
+
+// awarenessGone turns a client's last awareness message into one that marks it offline, so
+// others drop its cursor right away instead of after the awareness timeout. The payload is
+// lib0-encoded (same varints as encoding/binary): count, then clientID, clock, JSON state.
+func awarenessGone(msg []byte) []byte {
+	if len(msg) < 2 {
+		return nil
+	}
+	b := msg[1:]
+	var fields [3]uint64 // count, clientID, clock
+	for i := range fields {
+		v, n := binary.Uvarint(b)
+		if n <= 0 {
+			return nil
+		}
+		fields[i], b = v, b[n:]
+	}
+	if fields[0] != 1 {
+		return nil
+	}
+	out := binary.AppendUvarint([]byte{msgAwareness}, 1)
+	out = binary.AppendUvarint(out, fields[1])
+	out = binary.AppendUvarint(out, fields[2]+1)
+	out = binary.AppendUvarint(out, 4)
+	return append(out, "null"...)
 }
 
 func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []byte) error {
@@ -204,12 +254,12 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 
 func (s *server) noteSocket(w http.ResponseWriter, r *http.Request) {
 	noteID := pathID(r, "id")
-	ws, ok, err := s.access(r.Context(), currentUser(r).ID, "notes", noteID)
+	ws, err := s.roleOf(r.Context(), currentUser(r).ID, noteRole, noteID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	if !ok {
+	if ws.Role == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -222,7 +272,7 @@ func (s *server) noteSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	c := &client{send: make(chan []byte, 256), canEdit: ws.CanEdit()}
+	c := &client{userID: currentUser(r).ID, send: make(chan []byte, 256), canEdit: ws.CanEdit()}
 	go func() {
 		defer cancel()
 		for msg := range c.send {

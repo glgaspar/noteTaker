@@ -25,7 +25,10 @@ type note struct {
 	Content   string // TipTap JSON
 	Author    string
 	UpdatedAt time.Time
+	Role      string
 }
+
+func (n note) CanEdit() bool { return canEdit(n.Role) }
 
 func (f folder) Indent() string { return strings.Repeat("\u00a0\u00a0\u00a0", f.Depth) }
 
@@ -50,39 +53,42 @@ func workspaceURL(wsID, folderID, noteID int64) string {
 	return u
 }
 
-// noteList lists notes of a workspace, optionally only those directly inside a folder or with a tag.
-func (s *server) noteList(ctx context.Context, wsID, folderID, tagID int64) ([]noteItem, error) {
+// noteList lists the notes of a workspace the user can see, optionally only those directly
+// inside a folder or with a tag.
+func (s *server) noteList(ctx context.Context, userID, wsID, folderID, tagID int64) ([]noteItem, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, title, left(content_text, 120), updated_at FROM notes n
 		WHERE workspace_id = $1 AND ($2 = 0 OR folder_id = $2)
 		AND ($3 = 0 OR EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = $3))
-		ORDER BY updated_at DESC`, wsID, folderID, tagID)
+		AND effective_role($4, workspace_id, folder_id) IS NOT NULL
+		ORDER BY updated_at DESC`, wsID, folderID, tagID, userID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[noteItem])
 }
 
-// loadNote returns a note of the workspace, or nil if there is none with that id.
-func (s *server) loadNote(ctx context.Context, wsID, noteID int64) (*note, error) {
+// loadNote returns a note of the workspace, or nil if there is none the user can see with that id.
+func (s *server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*note, error) {
 	n := note{ID: noteID}
 	err := s.db.QueryRow(ctx, `
-		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(u.name, ''), n.updated_at
+		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(u.name, ''), n.updated_at,
+			coalesce(effective_role($3, n.workspace_id, n.folder_id), '')
 		FROM notes n LEFT JOIN users u ON u.id = n.author_id
-		WHERE n.id = $1 AND n.workspace_id = $2`, noteID, wsID).
-		Scan(&n.FolderID, &n.Title, &n.Content, &n.Author, &n.UpdatedAt)
-	if err == pgx.ErrNoRows {
+		WHERE n.id = $1 AND n.workspace_id = $2`, noteID, wsID, userID).
+		Scan(&n.FolderID, &n.Title, &n.Content, &n.Author, &n.UpdatedAt, &n.Role)
+	if err == pgx.ErrNoRows || n.Role == "" {
 		return nil, nil
 	}
 	return &n, err
 }
 
 func (s *server) createNote(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "workspaces")
+	folderID := formID(r, "folder_id")
+	ws, ok := s.container(w, r, pathID(r, "id"), folderID)
 	if !ok {
 		return
 	}
-	folderID := formID(r, "folder_id")
 	var id int64
 	if err := s.db.QueryRow(r.Context(), `INSERT INTO notes (workspace_id, folder_id, author_id) VALUES ($1, $2, $3) RETURNING id`,
 		ws.ID, folderID, currentUser(r).ID).Scan(&id); err != nil {
@@ -93,7 +99,7 @@ func (s *server) createNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) saveNote(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.editable(w, r, "notes"); !ok {
+	if _, ok := s.editable(w, r, noteRole); !ok {
 		return
 	}
 	var body struct {
@@ -114,12 +120,20 @@ func (s *server) saveNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) moveNote(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "notes")
+	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return
 	}
 	id := pathID(r, "id")
 	folderID := formID(r, "folder_id")
+	target, ok := s.container(w, r, ws.ID, folderID)
+	if !ok {
+		return
+	}
+	if target.ID != ws.ID {
+		http.Error(w, "folder is in another workspace", http.StatusBadRequest)
+		return
+	}
 	if _, err := s.db.Exec(r.Context(), `UPDATE notes SET folder_id = $1 WHERE id = $2`, folderID, id); err != nil {
 		serverError(w, err)
 		return
@@ -128,7 +142,7 @@ func (s *server) moveNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deleteNote(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "notes")
+	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return
 	}

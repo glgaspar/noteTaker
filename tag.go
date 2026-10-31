@@ -22,11 +22,13 @@ type noteTags struct {
 	Tags    []tag
 }
 
-// workspaceTags lists the tags in use in a workspace with their note counts.
-func (s *server) workspaceTags(ctx context.Context, wsID int64) ([]tag, error) {
+// workspaceTags lists the tags on notes the user can see, with their note counts.
+func (s *server) workspaceTags(ctx context.Context, userID, wsID int64) ([]tag, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT t.id, t.name, count(*)::int FROM tags t JOIN note_tags nt ON nt.tag_id = t.id
-		WHERE t.workspace_id = $1 GROUP BY t.id ORDER BY lower(t.name)`, wsID)
+		SELECT t.id, t.name, count(*)::int FROM tags t
+		JOIN note_tags nt ON nt.tag_id = t.id JOIN notes n ON n.id = nt.note_id
+		WHERE t.workspace_id = $1 AND effective_role($2, n.workspace_id, n.folder_id) IS NOT NULL
+		GROUP BY t.id ORDER BY lower(t.name)`, wsID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +57,7 @@ func (s *server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID i
 }
 
 func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "notes")
+	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return
 	}
@@ -78,7 +80,7 @@ func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) removeTag(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.editable(w, r, "notes"); !ok {
+	if _, ok := s.editable(w, r, noteRole); !ok {
 		return
 	}
 	noteID := pathID(r, "id")

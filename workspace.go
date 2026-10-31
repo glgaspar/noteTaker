@@ -14,10 +14,12 @@ import (
 type workspace struct {
 	ID   int64
 	Name string
-	Role string
+	Role string // "" when the user only sees it through shared folders
 }
 
-func (ws workspace) CanEdit() bool { return ws.Role == "owner" || ws.Role == "editor" }
+func canEdit(role string) bool { return role == "owner" || role == "editor" }
+
+func (ws workspace) CanEdit() bool { return canEdit(ws.Role) }
 
 func pathID(r *http.Request, name string) int64 {
 	id, _ := strconv.ParseInt(r.PathValue(name), 10, 64)
@@ -32,47 +34,32 @@ func formID(r *http.Request, name string) *int64 {
 	return &id
 }
 
-// workspaceFor returns the workspace with the user's role, or ok=false if they are not a member.
-func (s *server) workspaceFor(ctx context.Context, userID, wsID int64) (workspace, bool, error) {
-	ws := workspace{ID: wsID}
-	err := s.db.QueryRow(ctx, `
-		SELECT w.name, m.role FROM workspaces w
-		JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = $2
-		WHERE w.id = $1`, wsID, userID).Scan(&ws.Name, &ws.Role)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ws, false, nil
-	}
-	return ws, err == nil, err
-}
+// Queries returning (workspace_id, role) of the user ($1) for an object ($2).
+// Roles come from effective_role (see migrations/007_sharing.sql); "" means no access.
+const (
+	workspaceRole       = `SELECT id, coalesce(effective_role($1, id, NULL), '') FROM workspaces WHERE id = $2`
+	folderRole          = `SELECT workspace_id, coalesce(effective_role($1, workspace_id, id), '') FROM folders WHERE id = $2`
+	folderParentRole    = `SELECT workspace_id, coalesce(effective_role($1, workspace_id, parent_id), '') FROM folders WHERE id = $2`
+	folderWorkspaceRole = `SELECT workspace_id, coalesce(effective_role($1, workspace_id, NULL), '') FROM folders WHERE id = $2`
+	noteRole            = `SELECT workspace_id, coalesce(effective_role($1, workspace_id, folder_id), '') FROM notes WHERE id = $2`
+)
 
-// access resolves the workspace of a row in a workspace-owned table (folders, notes, ...).
-func (s *server) access(ctx context.Context, userID int64, table string, id int64) (workspace, bool, error) {
-	var wsID int64
-	err := s.db.QueryRow(ctx, fmt.Sprintf(`SELECT workspace_id FROM %s WHERE id = $1`, table), id).Scan(&wsID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return workspace{}, false, nil
-	}
-	if err != nil {
-		return workspace{}, false, err
-	}
-	return s.workspaceFor(ctx, userID, wsID)
-}
-
-// editable loads the workspace from the {id} path value and checks the user may edit it.
-// On failure it writes the response and returns ok=false.
-func (s *server) editable(w http.ResponseWriter, r *http.Request, table string) (workspace, bool) {
+func (s *server) roleOf(ctx context.Context, userID int64, query string, id int64) (workspace, error) {
 	var ws workspace
-	var ok bool
-	var err error
-	if table == "workspaces" {
-		ws, ok, err = s.workspaceFor(r.Context(), currentUser(r).ID, pathID(r, "id"))
-	} else {
-		ws, ok, err = s.access(r.Context(), currentUser(r).ID, table, pathID(r, "id"))
+	err := s.db.QueryRow(ctx, query, userID, id).Scan(&ws.ID, &ws.Role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return workspace{}, nil
 	}
+	return ws, err
+}
+
+// check verifies the user may edit the object; on failure it writes the response and returns false.
+func (s *server) check(w http.ResponseWriter, r *http.Request, query string, id int64) (workspace, bool) {
+	ws, err := s.roleOf(r.Context(), currentUser(r).ID, query, id)
 	switch {
 	case err != nil:
 		serverError(w, err)
-	case !ok:
+	case ws.Role == "":
 		http.NotFound(w, r)
 	case !ws.CanEdit():
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -82,16 +69,43 @@ func (s *server) editable(w http.ResponseWriter, r *http.Request, table string) 
 	return ws, false
 }
 
+// editable is check for the object in the {id} path value.
+func (s *server) editable(w http.ResponseWriter, r *http.Request, query string) (workspace, bool) {
+	return s.check(w, r, query, pathID(r, "id"))
+}
+
+// container checks the user may add to a folder, or to the workspace root when folderID is nil.
+func (s *server) container(w http.ResponseWriter, r *http.Request, wsID int64, folderID *int64) (workspace, bool) {
+	if folderID != nil {
+		return s.check(w, r, folderRole, *folderID)
+	}
+	return s.check(w, r, workspaceRole, wsID)
+}
+
+// userWorkspaces lists the workspaces a user is a member of or has shared folders in.
+// With wsID != 0 it returns at most that workspace.
+func (s *server) userWorkspaces(ctx context.Context, userID, wsID int64) ([]workspace, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT w.id, w.name, coalesce(m.role, '') FROM workspaces w
+		LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = $1
+		WHERE ($2 = 0 OR w.id = $2) AND (m.user_id IS NOT NULL OR EXISTS (
+			SELECT 1 FROM folder_members fm JOIN folders f ON f.id = fm.folder_id
+			WHERE f.workspace_id = w.id AND fm.user_id = $1))
+		ORDER BY lower(w.name)`, userID, wsID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[workspace])
+}
+
 func (s *server) home(w http.ResponseWriter, r *http.Request) {
-	var id int64
-	err := s.db.QueryRow(r.Context(), `SELECT workspace_id FROM workspace_members WHERE user_id = $1 ORDER BY workspace_id LIMIT 1`,
-		currentUser(r).ID).Scan(&id)
-	if err == nil {
-		redirect(w, r, fmt.Sprintf("/w/%d", id))
+	workspaces, err := s.userWorkspaces(r.Context(), currentUser(r).ID, 0)
+	if err != nil {
+		serverError(w, err)
 		return
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		serverError(w, err)
+	if len(workspaces) > 0 {
+		redirect(w, r, fmt.Sprintf("/w/%d", workspaces[0].ID))
 		return
 	}
 	s.render(w, "home.html", map[string]any{"User": currentUser(r)})
@@ -129,7 +143,7 @@ func (s *server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "workspaces")
+	ws, ok := s.editable(w, r, workspaceRole)
 	if !ok {
 		return
 	}
@@ -143,7 +157,7 @@ func (s *server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "workspaces")
+	ws, ok := s.editable(w, r, workspaceRole)
 	if !ok {
 		return
 	}
@@ -161,59 +175,59 @@ func (s *server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := currentUser(r)
-	ws, ok, err := s.workspaceFor(ctx, user.ID, pathID(r, "id"))
+	found, err := s.userWorkspaces(ctx, user.ID, pathID(r, "id"))
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	if !ok {
+	if len(found) == 0 {
 		http.NotFound(w, r)
 		return
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT w.id, w.name, m.role FROM workspaces w
-		JOIN workspace_members m ON m.workspace_id = w.id
-		WHERE m.user_id = $1 ORDER BY w.name`, user.ID)
+	ws := found[0]
+	workspaces, err := s.userWorkspaces(ctx, user.ID, 0)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	workspaces, err := pgx.CollectRows(rows, pgx.RowToStructByPos[workspace])
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	folders, err := s.folderTree(ctx, ws.ID)
+	folders, err := s.folderTree(ctx, ws, user.ID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	folderID := orZero(formID(r, "folder"))
 	tagID := orZero(formID(r, "tag"))
-	notes, err := s.noteList(ctx, ws.ID, folderID, tagID)
+	notes, err := s.noteList(ctx, user.ID, ws.ID, folderID, tagID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	n, err := s.loadNote(ctx, ws.ID, orZero(formID(r, "note")))
+	n, err := s.loadNote(ctx, user.ID, ws.ID, orZero(formID(r, "note")))
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	tags, err := s.workspaceTags(ctx, ws.ID)
+	tags, err := s.workspaceTags(ctx, user.ID, ws.ID)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	var nt noteTags
 	if n != nil {
-		if nt, err = s.noteTags(ctx, n.ID, ws.CanEdit()); err != nil {
+		if nt, err = s.noteTags(ctx, n.ID, n.CanEdit()); err != nil {
 			serverError(w, err)
 			return
 		}
 	}
+	// New notes go into the selected folder, or the workspace root.
+	canCreate := ws.CanEdit()
+	for _, f := range folders {
+		if f.ID == folderID {
+			canCreate = f.CanEdit()
+		}
+	}
 	s.render(w, "workspace.html", map[string]any{
 		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
-		"FolderID": folderID, "TagID": tagID, "Notes": notes, "Note": n, "NoteTags": nt,
+		"FolderID": folderID, "TagID": tagID, "Notes": notes, "Note": n, "NoteTags": nt, "CanCreate": canCreate,
 	})
 }

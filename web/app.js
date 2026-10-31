@@ -22,4 +22,12 @@ document.addEventListener("htmx:beforeSwap", (e) => {
     editor = null;
   }
 });
-window.addEventListener("pagehide", () => editor?.flush(true));
+window.addEventListener("pagehide", () => {
+  editor?.flush(true);
+  // Close the socket so others drop our cursor; the browser may keep this page in its back/forward cache.
+  editor?.destroy();
+  editor = null;
+});
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) location.reload();
+});

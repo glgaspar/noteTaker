@@ -7,12 +7,15 @@
       </summary>
       <div class="mt-1 space-y-1 rounded border border-stone-200 bg-white p-2">
         {{range .Workspaces}}
-        <a href="/w/{{.ID}}" class="block rounded px-2 py-1 hover:bg-stone-100 {{if eq .ID $.Workspace.ID}}font-medium{{end}}">{{.Name}}</a>
+        <a href="/w/{{.ID}}" class="block rounded px-2 py-1 hover:bg-stone-100 {{if eq .ID $.Workspace.ID}}font-medium{{end}}">{{.Name}}{{if not .Role}} <span class="text-xs text-stone-400">shared with you</span>{{end}}</a>
         {{end}}
         <form method="post" action="/workspaces" class="flex gap-1 border-t border-stone-100 pt-2">
           <input name="name" placeholder="New workspace" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
           <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
         </form>
+        {{if .Workspace.Role}}
+        <a href="/w/{{.Workspace.ID}}/members" class="block rounded px-2 py-1 hover:bg-stone-100">Members…</a>
+        {{end}}
         {{if .Workspace.CanEdit}}
         <form method="post" action="/w/{{.Workspace.ID}}/rename" class="flex gap-1">
           <input name="name" value="{{.Workspace.Name}}" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
@@ -41,15 +44,21 @@
           class="block truncate rounded py-1.5 pr-8 hover:bg-stone-200 {{if eq .ID $.FolderID}}bg-stone-200 font-medium{{end}}">
           <span class="pl-2">📁 {{.Name}}</span>
         </a>
-        {{if $.Workspace.CanEdit}}
+        {{if or .CanEdit .Manage $.Workspace.CanEdit}}
         <details class="absolute right-1 top-1">
           <summary class="cursor-pointer list-none rounded px-1.5 text-stone-400 opacity-0 hover:bg-stone-300 group-hover:opacity-100">⋯</summary>
           <div class="absolute right-0 z-10 mt-1 w-56 space-y-1 rounded border border-stone-200 bg-white p-2 shadow">
+            {{if .CanEdit}}
             <form method="post" action="/w/{{$.Workspace.ID}}/folders" class="flex gap-1">
               <input type="hidden" name="parent_id" value="{{.ID}}">
               <input name="name" placeholder="New subfolder" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
               <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
             </form>
+            {{end}}
+            {{if $.Workspace.CanEdit}}
+            <a href="/folders/{{.ID}}/share" class="block rounded px-2 py-1 hover:bg-stone-100">Share…</a>
+            {{end}}
+            {{if .Manage}}
             <form method="post" action="/folders/{{.ID}}/rename" class="flex gap-1">
               <input name="name" value="{{.Name}}" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
               <button class="rounded border border-stone-300 px-2 py-1">Rename</button>
@@ -57,6 +66,7 @@
             <form method="post" action="/folders/{{.ID}}/delete" hx-confirm="Delete this folder, its subfolders and notes?">
               <button class="w-full rounded px-2 py-1 text-left text-red-600 hover:bg-red-50">Delete folder</button>
             </form>
+            {{end}}
           </div>
         </details>
         {{end}}
@@ -81,7 +91,7 @@
   <section class="flex w-72 shrink-0 flex-col border-r border-stone-200 bg-white">
     <div class="flex items-center border-b border-stone-200 px-4 py-3">
       <span class="font-semibold">Notes</span>
-      {{if .Workspace.CanEdit}}
+      {{if .CanCreate}}
       <form method="post" action="/w/{{.Workspace.ID}}/notes" class="ml-auto">
         {{if .FolderID}}<input type="hidden" name="folder_id" value="{{.FolderID}}">{{end}}
         <button class="rounded bg-stone-900 px-2.5 py-1 text-sm text-white hover:bg-stone-700">+ New note</button>
@@ -107,18 +117,18 @@
   {{with .Note}}
   <section class="flex min-w-0 flex-1 flex-col bg-white">
     <div class="flex items-center gap-3 border-b border-stone-200 px-6 py-2 text-sm text-stone-500">
-      {{if $.Workspace.CanEdit}}
+      {{if .CanEdit}}
       <form method="post" action="/notes/{{.ID}}/move">
         <select name="folder_id" onchange="this.form.requestSubmit()" class="rounded border border-stone-200 px-2 py-1">
-          <option value="">No folder</option>
-          {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $.Note.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}
+          {{if $.Workspace.CanEdit}}<option value="">No folder</option>{{end}}
+          {{range $.Folders}}{{if .CanEdit}}<option value="{{.ID}}" {{if eq .ID $.Note.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}{{end}}
         </select>
       </form>
       {{end}}
       <span>{{with .Author}}by {{.}} · {{end}}updated {{.UpdatedAt.Format "Jan 2, 2006 15:04"}}</span>
       <span id="presence" class="ml-auto text-stone-600"></span>
       <span id="save-status"></span>
-      {{if $.Workspace.CanEdit}}
+      {{if .CanEdit}}
       <form method="post" action="/notes/{{.ID}}/delete" hx-confirm="Delete this note?">
         <button class="rounded px-2 py-1 text-red-600 hover:bg-red-50">Delete</button>
       </form>
@@ -126,10 +136,10 @@
     </div>
     <div class="flex-1 overflow-auto">
       <div class="mx-auto max-w-3xl px-6 py-8">
-        <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not $.Workspace.CanEdit}}readonly{{end}}
+        <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not .CanEdit}}readonly{{end}}
           class="mb-2 w-full text-3xl font-bold outline-none placeholder:text-stone-300">
         {{template "note_tags" $.NoteTags}}
-        {{if $.Workspace.CanEdit}}
+        {{if .CanEdit}}
         <div id="toolbar" class="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-1 border-y border-stone-100 bg-white py-1 text-sm">
           <button data-cmd="bold" class="rounded px-2 py-1 font-bold hover:bg-stone-100">B</button>
           <button data-cmd="italic" class="rounded px-2 py-1 italic hover:bg-stone-100">I</button>
@@ -150,7 +160,7 @@
         </div>
         {{end}}
         <div id="editor" class="prose prose-stone max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
-          data-editable="{{$.Workspace.CanEdit}}" data-user-id="{{$.User.ID}}" data-user-name="{{$.User.Name}}"></div>
+          data-editable="{{.CanEdit}}" data-user-id="{{$.User.ID}}" data-user-name="{{$.User.Name}}"></div>
       </div>
     </div>
   </section>

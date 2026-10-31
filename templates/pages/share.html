@@ -1,0 +1,50 @@
+{{define "content"}}
+<a href="{{.Back}}" class="text-sm text-stone-500 hover:text-stone-900">← Back</a>
+<h1 class="mt-2 text-2xl font-semibold">{{.Title}}</h1>
+<p class="mb-6 text-stone-600">{{.Subject}}</p>
+
+{{if .CanManage}}
+<form method="post" action="{{.Action}}" class="mb-4 flex gap-2">
+  <input name="email" type="email" placeholder="email@example.com" required
+    class="w-72 rounded border border-stone-300 px-3 py-2">
+  <select name="role" class="rounded border border-stone-300 px-2 py-2">
+    <option value="editor">Editor</option>
+    <option value="viewer">Viewer</option>
+  </select>
+  <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Share</button>
+</form>
+{{end}}
+{{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
+
+<ul class="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white text-sm">
+  {{range .Members}}
+  <li class="flex items-center gap-3 px-4 py-2">
+    <div>
+      <div class="font-medium">{{.Name}}{{if eq .UserID $.User.ID}} (you){{end}}</div>
+      <div class="text-stone-500">{{.Email}}</div>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      {{if or (eq .Role "owner") (not $.CanManage)}}
+      <span class="capitalize text-stone-600">{{.Role}}</span>
+      {{else}}
+      <form method="post" action="{{$.Action}}">
+        <input type="hidden" name="email" value="{{.Email}}">
+        <select name="role" onchange="this.form.requestSubmit()" class="rounded border border-stone-200 px-2 py-1">
+          <option value="editor" {{if eq .Role "editor"}}selected{{end}}>Editor</option>
+          <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Viewer</option>
+        </select>
+      </form>
+      {{end}}
+      {{if and (ne .Role "owner") (or $.CanManage (eq .UserID $.User.ID))}}
+      <form method="post" action="{{$.Action}}/{{.UserID}}/delete"
+        hx-confirm="{{if eq .UserID $.User.ID}}Leave?{{else}}Remove {{.Name}}?{{end}}">
+        <button class="rounded px-2 py-1 text-red-600 hover:bg-red-50">{{if eq .UserID $.User.ID}}Leave{{else}}Remove{{end}}</button>
+      </form>
+      {{end}}
+    </div>
+  </li>
+  {{else}}
+  <li class="px-4 py-3 text-stone-400">Not shared with anyone yet.</li>
+  {{end}}
+</ul>
+{{end}}

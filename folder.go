@@ -11,12 +11,19 @@ type folder struct {
 	ID       int64
 	ParentID *int64
 	Name     string
+	Role     string
+	Manage   bool // may rename or delete it (needs edit rights on the parent)
 	Depth    int
 }
 
-// folderTree returns the workspace folders in depth-first order, each with its depth.
-func (s *server) folderTree(ctx context.Context, wsID int64) ([]folder, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, parent_id, name FROM folders WHERE workspace_id = $1 ORDER BY lower(name)`, wsID)
+func (f folder) CanEdit() bool { return canEdit(f.Role) }
+
+// folderTree returns the folders the user can see in depth-first order, each with its
+// depth among the visible folders.
+func (s *server) folderTree(ctx context.Context, ws workspace, userID int64) ([]folder, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id, parent_id, name, coalesce(effective_role($2, workspace_id, id), '')
+		FROM folders WHERE workspace_id = $1 ORDER BY lower(name)`, ws.ID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -24,30 +31,31 @@ func (s *server) folderTree(ctx context.Context, wsID int64) ([]folder, error) {
 	children := map[int64][]folder{}
 	for rows.Next() {
 		var f folder
-		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name); err != nil {
+		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Role); err != nil {
 			return nil, err
 		}
-		var parent int64
-		if f.ParentID != nil {
-			parent = *f.ParentID
-		}
-		children[parent] = append(children[parent], f)
+		children[orZero(f.ParentID)] = append(children[orZero(f.ParentID)], f)
 	}
 	var out []folder
-	var walk func(parent int64, depth int)
-	walk = func(parent int64, depth int) {
+	var walk func(parent int64, depth int, parentRole string)
+	walk = func(parent int64, depth int, parentRole string) {
 		for _, f := range children[parent] {
+			if f.Role == "" { // hidden, but a subfolder may be shared
+				walk(f.ID, depth, "")
+				continue
+			}
 			f.Depth = depth
+			f.Manage = canEdit(parentRole)
 			out = append(out, f)
-			walk(f.ID, depth+1)
+			walk(f.ID, depth+1, f.Role)
 		}
 	}
-	walk(0, 0)
+	walk(0, 0, ws.Role)
 	return out, rows.Err()
 }
 
 func (s *server) createFolder(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "workspaces")
+	ws, ok := s.container(w, r, pathID(r, "id"), formID(r, "parent_id"))
 	if !ok {
 		return
 	}
@@ -66,7 +74,7 @@ func (s *server) createFolder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) renameFolder(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "folders")
+	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
 		return
 	}
@@ -81,7 +89,7 @@ func (s *server) renameFolder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deleteFolder(w http.ResponseWriter, r *http.Request) {
-	ws, ok := s.editable(w, r, "folders")
+	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
 		return
 	}
