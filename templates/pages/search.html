@@ -33,6 +33,14 @@
       </div>
     </form>
     <ul id="results" class="flex-1 divide-y divide-stone-100 overflow-auto">
+      {{template "result_items" .}}
+      {{if not .Results}}<li class="px-6 py-8 text-sm text-stone-400">No notes match.</li>{{end}}
+    </ul>
+  </section>
+</div>
+{{end}}
+
+{{define "result_items"}}
       {{range .Results}}
       <li>
         <a href="/w/{{$.Workspace.ID}}?{{if .FolderID}}folder={{.FolderID}}&{{end}}note={{.ID}}" class="block px-6 py-3 hover:bg-stone-50">
@@ -43,10 +51,10 @@
           </div>
         </a>
       </li>
-      {{else}}
-      <li class="px-6 py-8 text-sm text-stone-400">No notes match.</li>
       {{end}}
-    </ul>
-  </section>
-</div>
+      {{with .NextURL}}
+      <li hx-get="{{.}}" hx-trigger="click" hx-swap="outerHTML" class="px-6 py-3 text-center">
+        <button class="rounded border border-stone-300 px-3 py-1 text-sm text-stone-600 hover:bg-stone-50">Load more</button>
+      </li>
+      {{end}}
 {{end}}

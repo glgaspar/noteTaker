@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"html/template"
+	"maps"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -61,7 +63,11 @@ func parseDate(s string, nextDay bool) *time.Time {
 
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
-func (s *server) search(ctx context.Context, userID, wsID int64, r *http.Request) ([]searchResult, error) {
+const searchPageSize = 50
+
+// search returns one page of results; it fetches one extra row so callers can tell whether
+// there is a next page.
+func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *http.Request) ([]searchResult, error) {
 	dateField := "updated_at"
 	if r.FormValue("date_field") == "created" {
 		dateField = "created_at"
@@ -90,11 +96,12 @@ func (s *server) search(ctx context.Context, userID, wsID int64, r *http.Request
 			AND ($7 = 0 OR n.author_id = $7)
 			AND ($8::timestamptz IS NULL OR n.`+dateField+` >= $8)
 			AND ($9::timestamptz IS NULL OR n.`+dateField+` < $9)
-		ORDER BY CASE WHEN q.query IS NULL THEN 0 ELSE ts_rank(n.search, q.query) END DESC, n.updated_at DESC
-		LIMIT 50`,
+		ORDER BY CASE WHEN q.query IS NULL THEN 0 ELSE ts_rank(n.search, q.query) END DESC, n.updated_at DESC, n.id DESC
+		LIMIT $10 OFFSET $11`,
 		wsID, prefixQuery(r.FormValue("q")), userID, likeEscaper.Replace(strings.TrimSpace(r.FormValue("title"))),
 		orZero(formID(r, "folder")), orZero(formID(r, "tag")), orZero(formID(r, "author")),
-		parseDate(r.FormValue("from"), false), parseDate(r.FormValue("to"), true))
+		parseDate(r.FormValue("from"), false), parseDate(r.FormValue("to"), true),
+		searchPageSize+1, page*searchPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -131,9 +138,22 @@ func (s *server) searchPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := data["Workspace"].(workspace)
-	results, err := s.search(ctx, user.ID, ws.ID, r)
+	page, _ := strconv.Atoi(r.FormValue("page"))
+	page = max(page, 0)
+	results, err := s.search(ctx, user.ID, ws.ID, page, r)
 	if err != nil {
 		serverError(w, err)
+		return
+	}
+	if len(results) > searchPageSize {
+		results = results[:searchPageSize]
+		next := maps.Clone(r.URL.Query())
+		next.Set("page", strconv.Itoa(page+1))
+		data["NextURL"] = r.URL.Path + "?" + next.Encode()
+	}
+	data["Results"] = results
+	if page > 0 { // "Load more" only needs the next items
+		s.renderPartial(w, "search.html", "result_items", data)
 		return
 	}
 	authors, err := s.authors(ctx, user.ID, ws.ID)
@@ -141,7 +161,6 @@ func (s *server) searchPage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	data["Results"] = results
 	data["Authors"] = authors
 	data["Form"] = r.Form
 	s.render(w, "search.html", data)

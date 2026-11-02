@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"html/template"
 	"io/fs"
 	"log"
@@ -41,6 +43,8 @@ func (s *server) renderPartial(w http.ResponseWriter, page, name string, data an
 }
 
 func serverError(w http.ResponseWriter, err error) {
-	log.Print(err)
+	if !errors.Is(err, context.Canceled) { // the client went away, e.g. a superseded live search
+		log.Print(err)
+	}
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
