@@ -39,6 +39,18 @@ func hashToken(token string) []byte {
 	return h[:]
 }
 
+// PasswordProblem says what is wrong with a new password, or "" when it is acceptable. bcrypt
+// only takes 72 bytes, so longer passwords are refused rather than cut silently.
+func PasswordProblem(password string) string {
+	switch {
+	case len(password) < 8:
+		return "Use at least 8 characters."
+	case len(password) > 72:
+		return "Use at most 72 characters (fewer if they are accented or emoji)."
+	}
+	return ""
+}
+
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }

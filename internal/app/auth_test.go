@@ -73,6 +73,9 @@ func TestInviteFlow(t *testing.T) {
 	if res := guest.post(path, url.Values{"name": {"New"}, "password": {"short"}}); !strings.Contains(res.body, "at least 8") {
 		t.Errorf("short password accepted: %d", res.code)
 	}
+	if res := guest.post(path, url.Values{"name": {"New"}, "password": {strings.Repeat("x", 73)}}); !strings.Contains(res.body, "at most 72") {
+		t.Errorf("73-character password: %d", res.code)
+	}
 	if res := guest.post(path, url.Values{"name": {"New"}, "password": {"longenough"}}); res.code != http.StatusSeeOther {
 		t.Fatalf("accept invite = %d", res.code)
 	}

@@ -87,8 +87,8 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	token := r.PathValue("token")
 	password := r.FormValue("password")
-	if len(password) < 8 {
-		s.render(w, "reset.html", map[string]any{"Token": token, "Error": "Use at least 8 characters."})
+	if problem := PasswordProblem(password); problem != "" {
+		s.render(w, "reset.html", map[string]any{"Token": token, "Error": problem})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

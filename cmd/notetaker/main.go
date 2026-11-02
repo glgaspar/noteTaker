@@ -121,8 +121,8 @@ func createAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error {
 	if err != nil && len(pw) == 0 {
 		return err
 	}
-	if len(pw) < 8 {
-		return fmt.Errorf("password must have at least 8 characters")
+	if problem := app.PasswordProblem(string(pw)); problem != "" {
+		return fmt.Errorf("password: %s", problem)
 	}
 	hash, err := bcrypt.GenerateFromPassword(pw, bcrypt.DefaultCost)
 	if err != nil {

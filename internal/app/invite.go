@@ -143,11 +143,12 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "invite.html", map[string]any{"Invalid": true})
 		return
 	}
-	if name == "" || len(password) < 8 {
-		s.render(w, "invite.html", map[string]any{
-			"Email": email, "Token": token, "Name": name,
-			"Error": "Enter your name and a password with at least 8 characters.",
-		})
+	problem := PasswordProblem(password)
+	if name == "" {
+		problem = "Enter your name."
+	}
+	if problem != "" {
+		s.render(w, "invite.html", map[string]any{"Email": email, "Token": token, "Name": name, "Error": problem})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
