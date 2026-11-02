@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 )
 
 // newResetLink replaces any pending reset for the user with a fresh one.
-func (s *server) newResetLink(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
+func (s *Server) newResetLink(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
 	token := rand.Text()
 	if _, err := s.db.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1 OR expires_at < now()`, userID); err != nil {
 		return "", err
@@ -30,7 +30,7 @@ const resetBody = "A password reset was requested for your NoteTaker account. Ch
 	"If you did not ask for this, ignore this email.\n"
 
 // adminReset sends a user a reset link; without SMTP the admin sees the link.
-func (s *server) adminReset(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminReset(w http.ResponseWriter, r *http.Request) {
 	var email string
 	if err := s.db.QueryRow(r.Context(), `SELECT email FROM users WHERE id = $1`, pathID(r, "id")).Scan(&email); err != nil {
 		http.NotFound(w, r)
@@ -44,13 +44,13 @@ func (s *server) adminReset(w http.ResponseWriter, r *http.Request) {
 	s.renderAdmin(w, r, s.sendLink(email, "Reset your NoteTaker password", resetBody, link, "Reset link sent to "+email+"."))
 }
 
-func (s *server) forgotPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) forgotPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "forgot.html", nil)
 }
 
 // forgot emails a reset link if the account exists. The answer is the same either way, and
 // without SMTP the link is only logged, so this cannot be used to take over accounts.
-func (s *server) forgot(w http.ResponseWriter, r *http.Request) {
+func (s *Server) forgot(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
 	if blocked, _ := s.resetIP.blocked(ip); blocked {
 		s.render(w, "forgot.html", map[string]any{"Error": "Too many requests. Try again later."})
@@ -76,14 +76,14 @@ func (s *server) forgot(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "forgot.html", map[string]any{"Sent": true})
 }
 
-func (s *server) resetPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) resetPage(w http.ResponseWriter, r *http.Request) {
 	var exists bool
 	s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM password_resets WHERE token_hash = $1 AND expires_at > now())`,
 		hashToken(r.PathValue("token"))).Scan(&exists)
 	s.render(w, "reset.html", map[string]any{"Invalid": !exists, "Token": r.PathValue("token")})
 }
 
-func (s *server) resetPassword(w http.ResponseWriter, r *http.Request) {
+func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	token := r.PathValue("token")
 	password := r.FormValue("password")
@@ -129,7 +129,7 @@ func (s *server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kick(userID)
+	s.hub.Kick(userID)
 	if err := s.startSession(ctx, w, userID); err != nil {
 		serverError(w, err)
 		return

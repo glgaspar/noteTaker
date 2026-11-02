@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -44,7 +44,7 @@ const (
 	noteRole            = `SELECT workspace_id, coalesce(effective_role($1, workspace_id, folder_id), '') FROM notes WHERE id = $2`
 )
 
-func (s *server) roleOf(ctx context.Context, userID int64, query string, id int64) (workspace, error) {
+func (s *Server) roleOf(ctx context.Context, userID int64, query string, id int64) (workspace, error) {
 	var ws workspace
 	err := s.db.QueryRow(ctx, query, userID, id).Scan(&ws.ID, &ws.Role)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -54,7 +54,7 @@ func (s *server) roleOf(ctx context.Context, userID int64, query string, id int6
 }
 
 // check verifies the user may edit the object; on failure it writes the response and returns false.
-func (s *server) check(w http.ResponseWriter, r *http.Request, query string, id int64) (workspace, bool) {
+func (s *Server) check(w http.ResponseWriter, r *http.Request, query string, id int64) (workspace, bool) {
 	ws, err := s.roleOf(r.Context(), currentUser(r).ID, query, id)
 	switch {
 	case err != nil:
@@ -70,12 +70,12 @@ func (s *server) check(w http.ResponseWriter, r *http.Request, query string, id 
 }
 
 // editable is check for the object in the {id} path value.
-func (s *server) editable(w http.ResponseWriter, r *http.Request, query string) (workspace, bool) {
+func (s *Server) editable(w http.ResponseWriter, r *http.Request, query string) (workspace, bool) {
 	return s.check(w, r, query, pathID(r, "id"))
 }
 
 // container checks the user may add to a folder, or to the workspace root when folderID is nil.
-func (s *server) container(w http.ResponseWriter, r *http.Request, wsID int64, folderID *int64) (workspace, bool) {
+func (s *Server) container(w http.ResponseWriter, r *http.Request, wsID int64, folderID *int64) (workspace, bool) {
 	if folderID != nil {
 		return s.check(w, r, folderRole, *folderID)
 	}
@@ -84,7 +84,7 @@ func (s *server) container(w http.ResponseWriter, r *http.Request, wsID int64, f
 
 // userWorkspaces lists the workspaces a user is a member of or has shared folders in.
 // With wsID != 0 it returns at most that workspace.
-func (s *server) userWorkspaces(ctx context.Context, userID, wsID int64) ([]workspace, error) {
+func (s *Server) userWorkspaces(ctx context.Context, userID, wsID int64) ([]workspace, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT w.id, w.name, coalesce(m.role, '') FROM workspaces w
 		LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = $1
@@ -98,7 +98,7 @@ func (s *server) userWorkspaces(ctx context.Context, userID, wsID int64) ([]work
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[workspace])
 }
 
-func (s *server) home(w http.ResponseWriter, r *http.Request) {
+func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	workspaces, err := s.userWorkspaces(r.Context(), currentUser(r).ID, 0)
 	if err != nil {
 		serverError(w, err)
@@ -111,7 +111,7 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "home.html", map[string]any{"User": currentUser(r)})
 }
 
-func (s *server) createWorkspace(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
@@ -142,7 +142,7 @@ func (s *server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/w/%d", id))
 }
 
-func (s *server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
+func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, workspaceRole)
 	if !ok {
 		return
@@ -156,7 +156,7 @@ func (s *server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/w/%d", ws.ID))
 }
 
-func (s *server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
+func (s *Server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, workspaceRole)
 	if !ok {
 		return
@@ -174,7 +174,7 @@ func (s *server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 // sidebar loads the workspace in the {id} path value and the data the sidebar partial needs.
 // On failure it writes the response and returns ok=false.
-func (s *server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+func (s *Server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	ctx := r.Context()
 	user := currentUser(r)
 	found, err := s.userWorkspaces(ctx, user.ID, pathID(r, "id"))
@@ -208,7 +208,7 @@ func (s *server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any
 	}, true
 }
 
-func (s *server) workspacePage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) workspacePage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := currentUser(r)
 	data, ok := s.sidebar(w, r)

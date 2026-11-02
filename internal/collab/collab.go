@@ -1,10 +1,10 @@
-package main
+// Package collab relays live edits between the editors of a note.
+package collab
 
 import (
 	"context"
 	"encoding/binary"
 	"log"
-	"net/http"
 	"slices"
 	"sync"
 
@@ -23,23 +23,23 @@ import (
 //	                  synced [1 if this client must seed the doc from the note JSON], compact,
 //	                  ack [8-byte seq of the client's own update]
 const (
-	msgUpdate    = 0
-	msgAwareness = 1
-	msgSnapshot  = 2
-	msgSynced    = 3
-	msgCompact   = 4
-	msgAck       = 5
+	MsgUpdate    = 0
+	MsgAwareness = 1
+	MsgSnapshot  = 2
+	MsgSynced    = 3
+	MsgCompact   = 4
+	MsgAck       = 5
 
 	// ask a client for a snapshot every time the log grows by this many rows
-	compactEvery = 100
+	CompactEvery = 100
 )
 
-type hub struct {
+type Hub struct {
 	mu    sync.Mutex
 	rooms map[int64]*room
 }
 
-func (h *hub) room(noteID int64) *room {
+func (h *Hub) room(noteID int64) *room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.rooms == nil {
@@ -51,19 +51,19 @@ func (h *hub) room(noteID int64) *room {
 	return h.rooms[noteID]
 }
 
-// kick disconnects all of a user's sockets, e.g. after their access changed.
+// Kick disconnects all of a user's sockets, e.g. after their access changed.
 // They reconnect with their new role, or are refused.
-func (h *hub) kick(userID int64) {
+func (h *Hub) Kick(userID int64) {
 	h.disconnect(func(*room) bool { return true }, func(c *client) bool { return c.userID == userID })
 }
 
-// kickNotes disconnects everyone editing the given notes, e.g. after a move changed who may
+// KickNotes disconnects everyone editing the given notes, e.g. after a move changed who may
 // access them.
-func (h *hub) kickNotes(noteIDs []int64) {
+func (h *Hub) KickNotes(noteIDs []int64) {
 	h.disconnect(func(rm *room) bool { return slices.Contains(noteIDs, rm.noteID) }, func(*client) bool { return true })
 }
 
-func (h *hub) disconnect(inRoom func(*room) bool, match func(*client) bool) {
+func (h *Hub) disconnect(inRoom func(*room) bool, match func(*client) bool) {
 	h.mu.Lock()
 	var rooms []*room
 	for _, rm := range h.rooms {
@@ -154,7 +154,7 @@ func (rm *room) join(ctx context.Context, db *pgxpool.Pool, c *client) error {
 		if err := rows.Scan(&seq, &data); err != nil {
 			return err
 		}
-		c.send <- seqMsg(msgUpdate, seq, data)
+		c.send <- seqMsg(MsgUpdate, seq, data)
 		n++
 	}
 	if err := rows.Err(); err != nil {
@@ -165,7 +165,7 @@ func (rm *room) join(ctx context.Context, db *pgxpool.Pool, c *client) error {
 	if seed {
 		rm.seeder = c
 	}
-	synced := []byte{msgSynced, 0}
+	synced := []byte{MsgSynced, 0}
 	if seed {
 		synced[1] = 1
 	}
@@ -207,7 +207,7 @@ func awarenessGone(msg []byte) []byte {
 	if fields[0] != 1 {
 		return nil
 	}
-	out := binary.AppendUvarint([]byte{msgAwareness}, 1)
+	out := binary.AppendUvarint([]byte{MsgAwareness}, 1)
 	out = binary.AppendUvarint(out, fields[1])
 	out = binary.AppendUvarint(out, fields[2]+1)
 	out = binary.AppendUvarint(out, 4)
@@ -221,10 +221,10 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	switch msg[0] {
-	case msgAwareness:
+	case MsgAwareness:
 		c.awareness = msg
 		rm.broadcast(c, msg)
-	case msgUpdate:
+	case MsgUpdate:
 		if !c.canEdit {
 			return nil
 		}
@@ -235,12 +235,12 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 		}
 		rm.rows++
 		rm.seeder = nil
-		rm.broadcast(c, seqMsg(msgUpdate, seq, msg[1:]))
-		rm.sendTo(c, seqMsg(msgAck, seq, nil))
-		if rm.rows%compactEvery == 0 {
-			rm.sendTo(c, []byte{msgCompact})
+		rm.broadcast(c, seqMsg(MsgUpdate, seq, msg[1:]))
+		rm.sendTo(c, seqMsg(MsgAck, seq, nil))
+		if rm.rows%CompactEvery == 0 {
+			rm.sendTo(c, []byte{MsgCompact})
 		}
-	case msgSnapshot:
+	case MsgSnapshot:
 		if !c.canEdit || len(msg) < 9 {
 			return nil
 		}
@@ -266,27 +266,14 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 	return nil
 }
 
-func (s *server) noteSocket(w http.ResponseWriter, r *http.Request) {
-	noteID := pathID(r, "id")
-	ws, err := s.roleOf(r.Context(), currentUser(r).ID, noteRole, noteID)
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	if ws.Role == "" {
-		http.NotFound(w, r)
-		return
-	}
-	conn, err := websocket.Accept(w, r, nil) // rejects cross-origin requests
-	if err != nil {
-		return
-	}
+// Serve runs one editor's connection to a note until it closes.
+func (h *Hub) Serve(ctx context.Context, conn *websocket.Conn, db *pgxpool.Pool, noteID, userID int64, canEdit bool) {
 	defer conn.CloseNow()
 	conn.SetReadLimit(16 << 20)
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	c := &client{userID: currentUser(r).ID, send: make(chan []byte, 256), canEdit: ws.CanEdit()}
+	c := &client{userID: userID, send: make(chan []byte, 256), canEdit: canEdit}
 	go func() {
 		defer cancel()
 		for msg := range c.send {
@@ -297,8 +284,8 @@ func (s *server) noteSocket(w http.ResponseWriter, r *http.Request) {
 		conn.Close(websocket.StatusNormalClosure, "")
 	}()
 
-	rm := s.hub.room(noteID)
-	if err := rm.join(ctx, s.db, c); err != nil {
+	rm := h.room(noteID)
+	if err := rm.join(ctx, db, c); err != nil {
 		log.Printf("note %d join: %v", noteID, err)
 		rm.leave(c)
 		return
@@ -309,7 +296,7 @@ func (s *server) noteSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		if err := rm.handle(ctx, s.db, c, msg); err != nil {
+		if err := rm.handle(ctx, db, c, msg); err != nil {
 			log.Printf("note %d: %v", noteID, err)
 			return
 		}

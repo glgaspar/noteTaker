@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"notetaker"
+	"notetaker/internal/db"
+	"notetaker/internal/storage"
 	"os"
 	"regexp"
 	"strconv"
@@ -28,9 +31,16 @@ import (
 
 var (
 	testDB    *pgxpool.Pool
-	testFiles *storage
+	testFiles *storage.Storage
 	seq       atomic.Int64 // makes test data unique
 )
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
@@ -44,14 +54,15 @@ func TestMain(m *testing.M) {
 	if testDB, err = pgxpool.New(ctx, dsn); err != nil {
 		panic(err)
 	}
-	if err := migrate(ctx, testDB); err != nil {
+	if err := db.Migrate(ctx, testDB, notetaker.Migrations); err != nil {
 		panic(err)
 	}
-	os.Setenv("S3_ENDPOINT", env("TEST_S3_ENDPOINT", "localhost:9000"))
-	os.Setenv("S3_ACCESS_KEY", env("TEST_S3_ACCESS_KEY", "notetaker"))
-	os.Setenv("S3_SECRET_KEY", env("TEST_S3_SECRET_KEY", "notetaker-secret"))
-	os.Setenv("S3_BUCKET", "notetaker-test")
-	if testFiles, err = newStorage(ctx); err != nil {
+	if testFiles, err = storage.New(ctx, storage.Config{
+		Endpoint:  env("TEST_S3_ENDPOINT", "localhost:9000"),
+		AccessKey: env("TEST_S3_ACCESS_KEY", "notetaker"),
+		SecretKey: env("TEST_S3_SECRET_KEY", "notetaker-secret"),
+		Bucket:    "notetaker-test",
+	}); err != nil {
 		testFiles = nil // storage tests skip
 	}
 	os.Exit(m.Run())
@@ -78,25 +89,25 @@ func recreateDB(ctx context.Context, dsn string) error {
 
 type app struct {
 	t   *testing.T
-	s   *server
+	s   *Server
 	url string
 }
 
 // newApp starts the HTTP server; withFiles also enables attachment storage (or skips the test).
 func newApp(t *testing.T, withFiles bool) *app {
 	t.Helper()
-	var files *storage
+	var files *storage.Storage
 	if withFiles {
 		if testFiles == nil {
 			t.Skip("RustFS not reachable; start it with `make db`")
 		}
 		files = testFiles
 	}
-	s, err := newServer(testDB, files, "")
+	s, err := New(Config{DB: testDB, Files: files})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(s.routes())
+	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	s.baseURL = ts.URL
 	return &app{t: t, s: s, url: ts.URL}

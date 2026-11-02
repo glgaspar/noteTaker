@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -32,7 +32,7 @@ type sharePage struct {
 
 // knownUsers lists people the user already works with: members of their workspaces and people
 // with folder shares in them. Share forms suggest only these, so the user list stays private.
-func (s *server) knownUsers(r *http.Request) []member {
+func (s *Server) knownUsers(r *http.Request) []member {
 	rows, err := s.db.Query(r.Context(), `
 		WITH mine AS (SELECT workspace_id FROM workspace_members WHERE user_id = $1)
 		SELECT u.id, u.name, u.email, '' FROM users u
@@ -50,7 +50,7 @@ func (s *server) knownUsers(r *http.Request) []member {
 	return known
 }
 
-func (s *server) members(r *http.Request, query string, id int64) ([]member, error) {
+func (s *Server) members(r *http.Request, query string, id int64) ([]member, error) {
 	rows, err := s.db.Query(r.Context(), query, id)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (s *server) members(r *http.Request, query string, id int64) ([]member, err
 
 // shareTarget resolves the email and role posted to a share form. msg explains to the user
 // why the input is not acceptable.
-func (s *server) shareTarget(r *http.Request) (userID int64, role, msg string, err error) {
+func (s *Server) shareTarget(r *http.Request) (userID int64, role, msg string, err error) {
 	role = r.FormValue("role")
 	if role != "editor" && role != "viewer" {
 		return 0, "", "Pick a role.", nil
@@ -76,7 +76,7 @@ const workspaceMembersQuery = `
 	SELECT u.id, u.name, u.email, m.role FROM workspace_members m JOIN users u ON u.id = m.user_id
 	WHERE m.workspace_id = $1 ORDER BY m.role = 'owner' DESC, lower(u.name)`
 
-func (s *server) renderWorkspaceMembers(w http.ResponseWriter, r *http.Request, msg string) {
+func (s *Server) renderWorkspaceMembers(w http.ResponseWriter, r *http.Request, msg string) {
 	user := currentUser(r)
 	found, err := s.userWorkspaces(r.Context(), user.ID, pathID(r, "id"))
 	if err != nil {
@@ -100,11 +100,11 @@ func (s *server) renderWorkspaceMembers(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *server) workspaceMembers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) workspaceMembers(w http.ResponseWriter, r *http.Request) {
 	s.renderWorkspaceMembers(w, r, "")
 }
 
-func (s *server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+func (s *Server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, workspaceRole)
 	if !ok {
 		return
@@ -134,7 +134,7 @@ func (s *server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kick(userID)
+	s.hub.Kick(userID)
 	if added {
 		var name string
 		s.db.QueryRow(r.Context(), `SELECT name FROM workspaces WHERE id = $1`, ws.ID).Scan(&name)
@@ -144,7 +144,7 @@ func (s *server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // removeWorkspaceMember lets the owner remove anyone but themselves, and any member leave.
-func (s *server) removeWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+func (s *Server) removeWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	ws, err := s.roleOf(r.Context(), user.ID, workspaceRole, pathID(r, "id"))
 	if err != nil {
@@ -162,7 +162,7 @@ func (s *server) removeWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kick(target)
+	s.hub.Kick(target)
 	if leaving {
 		redirect(w, r, "/")
 		return
@@ -174,7 +174,7 @@ const folderMembersQuery = `
 	SELECT u.id, u.name, u.email, m.role FROM folder_members m JOIN users u ON u.id = m.user_id
 	WHERE m.folder_id = $1 ORDER BY lower(u.name)`
 
-func (s *server) renderFolderShares(w http.ResponseWriter, r *http.Request, msg string) {
+func (s *Server) renderFolderShares(w http.ResponseWriter, r *http.Request, msg string) {
 	ws, ok := s.editable(w, r, folderWorkspaceRole)
 	if !ok {
 		return
@@ -197,11 +197,11 @@ func (s *server) renderFolderShares(w http.ResponseWriter, r *http.Request, msg 
 	})
 }
 
-func (s *server) folderShares(w http.ResponseWriter, r *http.Request) {
+func (s *Server) folderShares(w http.ResponseWriter, r *http.Request) {
 	s.renderFolderShares(w, r, "")
 }
 
-func (s *server) addFolderShare(w http.ResponseWriter, r *http.Request) {
+func (s *Server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.editable(w, r, folderWorkspaceRole); !ok {
 		return
 	}
@@ -222,7 +222,7 @@ func (s *server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kick(userID)
+	s.hub.Kick(userID)
 	if added {
 		var name string
 		var wsID int64
@@ -233,7 +233,7 @@ func (s *server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/folders/%d/share", pathID(r, "id")))
 }
 
-func (s *server) removeFolderShare(w http.ResponseWriter, r *http.Request) {
+func (s *Server) removeFolderShare(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.editable(w, r, folderWorkspaceRole); !ok {
 		return
 	}
@@ -243,12 +243,12 @@ func (s *server) removeFolderShare(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kick(target)
+	s.hub.Kick(target)
 	redirect(w, r, fmt.Sprintf("/folders/%d/share", pathID(r, "id")))
 }
 
 // notifyShare emails a user that something was shared with them, without delaying the request.
-func (s *server) notifyShare(userID int64, sharer, what, role, path string) {
+func (s *Server) notifyShare(userID int64, sharer, what, role, path string) {
 	go func() {
 		var email string
 		if err := s.db.QueryRow(context.Background(), `SELECT email FROM users WHERE id = $1`, userID).Scan(&email); err != nil {

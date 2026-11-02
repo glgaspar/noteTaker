@@ -1,8 +1,7 @@
-package main
+package app
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,26 +9,24 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"notetaker"
 	"path"
 	"strings"
 	"time"
-	"unicode"
 	_ "time/tzdata" // zone names work even in minimal containers
+	"unicode"
 )
-
-//go:embed templates
-var templateFS embed.FS
 
 // parseTemplates pairs each page with the shared layout and partials.
 func parseTemplates(funcs template.FuncMap) map[string]*template.Template {
-	pages, err := fs.Glob(templateFS, "templates/pages/*.html")
+	pages, err := fs.Glob(notetaker.Templates, "templates/pages/*.html")
 	if err != nil {
 		log.Fatal(err)
 	}
 	m := map[string]*template.Template{}
 	for _, p := range pages {
 		t := template.New("layout.html").Funcs(funcs)
-		m[path.Base(p)] = template.Must(t.ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", p))
+		m[path.Base(p)] = template.Must(t.ParseFS(notetaker.Templates, "templates/layout.html", "templates/partials/*.html", p))
 	}
 	return m
 }
@@ -56,7 +53,7 @@ func local(loc *time.Location, t time.Time) time.Time {
 }
 
 // icon renders a Lucide icon from the sprite built by scripts/assets.mjs.
-func (s *server) icon(name string, class ...string) template.HTML {
+func (s *Server) icon(name string, class ...string) template.HTML {
 	return template.HTML(fmt.Sprintf(`<svg class="icon %s" aria-hidden="true"><use href="%s#%s"/></svg>`,
 		template.HTMLEscapeString(strings.Join(class, " ")), s.assetURL("/static/dist/icons.svg"), template.HTMLEscapeString(name)))
 }
@@ -88,7 +85,10 @@ func ago(loc *time.Location, t time.Time) string {
 	t = local(loc, t)
 	now := time.Now().In(t.Location())
 	d := now.Sub(t)
-	day := func(x time.Time) time.Time { y, m, dd := x.Date(); return time.Date(y, m, dd, 0, 0, 0, 0, x.Location()) }
+	day := func(x time.Time) time.Time {
+		y, m, dd := x.Date()
+		return time.Date(y, m, dd, 0, 0, 0, 0, x.Location())
+	}
 	days := int(day(now).Sub(day(t)).Hours() / 24)
 	switch {
 	case d < time.Minute:
@@ -107,14 +107,14 @@ func ago(loc *time.Location, t time.Time) string {
 	return t.Format("Jan 2, 2006")
 }
 
-func (s *server) render(w http.ResponseWriter, name string, data any) {
+func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl[name].ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render %s: %v", name, err)
 	}
 }
 
-func (s *server) renderPartial(w http.ResponseWriter, page, name string, data any) {
+func (s *Server) renderPartial(w http.ResponseWriter, page, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl[page].ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("render %s/%s: %v", page, name, err)

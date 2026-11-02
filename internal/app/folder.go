@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func (f folder) CanEdit() bool { return canEdit(f.Role) }
 
 // folderTree returns the folders the user can see in depth-first order, each with its
 // depth among the visible folders.
-func (s *server) folderTree(ctx context.Context, ws workspace, userID int64) ([]folder, error) {
+func (s *Server) folderTree(ctx context.Context, ws workspace, userID int64) ([]folder, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, parent_id, name, coalesce(effective_role($2, workspace_id, id), '')
 		FROM folders WHERE workspace_id = $1 ORDER BY lower(name)`, ws.ID, userID)
@@ -56,7 +56,7 @@ func (s *server) folderTree(ctx context.Context, ws workspace, userID int64) ([]
 	return out, rows.Err()
 }
 
-func (s *server) createFolder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.container(w, r, pathID(r, "id"), formID(r, "parent_id"))
 	if !ok {
 		return
@@ -75,7 +75,7 @@ func (s *server) createFolder(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
 }
 
-func (s *server) renameFolder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
 		return
@@ -90,7 +90,7 @@ func (s *server) renameFolder(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
 }
 
-func (s *server) deleteFolder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
 		return
@@ -104,7 +104,7 @@ func (s *server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 
 // moveFolderPage lists where a folder can go: folders the user can edit, except the folder
 // itself and its subfolders.
-func (s *server) moveFolderPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) moveFolderPage(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
 		return
@@ -143,7 +143,7 @@ func (s *server) moveFolderPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) moveFolder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) moveFolder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ws, ok := s.editable(w, r, folderParentRole)
 	if !ok {
@@ -202,6 +202,6 @@ func (s *server) moveFolder(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kickNotes(notes) // shares inherited from the old or new parents changed
+	s.hub.KickNotes(notes) // shares inherited from the old or new parents changed
 	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
 }

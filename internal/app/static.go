@@ -1,20 +1,17 @@
-package main
+package app
 
 import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"embed"
 	"io/fs"
 	"mime"
 	"net/http"
+	"notetaker"
 	"path"
 	"strings"
 )
-
-//go:embed static
-var staticFS embed.FS
 
 type asset struct {
 	data, gz []byte // gz is nil when compressing does not help
@@ -25,11 +22,11 @@ type asset struct {
 // loadAssets reads the embedded static files once, precompressing them.
 func loadAssets() (map[string]*asset, error) {
 	assets := map[string]*asset{}
-	err := fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(notetaker.Static, "static", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		data, err := staticFS.ReadFile(p)
+		data, err := notetaker.Static.ReadFile(p)
 		if err != nil {
 			return err
 		}
@@ -49,14 +46,14 @@ func loadAssets() (map[string]*asset, error) {
 }
 
 // assetURL adds the content version to a static path, so browsers can cache it forever.
-func (s *server) assetURL(p string) string {
+func (s *Server) assetURL(p string) string {
 	if a := s.assets[p]; a != nil {
 		return p + "?v=" + a.version
 	}
 	return p
 }
 
-func (s *server) serveStatic(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	a := s.assets[r.URL.Path]
 	if a == nil {
 		http.NotFound(w, r)

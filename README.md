@@ -13,7 +13,7 @@ Requirements: Go 1.26, Node 24, Docker.
 
 ```sh
 make db                                                  # Postgres and RustFS in Docker
-go run . create-admin you@example.com "Your Name"        # prompts for a password
+go run ./cmd/notetaker create-admin you@example.com "Your Name"   # prompts for a password
 make dev                                                 # builds assets, serves http://localhost:8080
 ```
 
@@ -21,7 +21,7 @@ Users only join by invitation: as admin, open **Users** and send an invite. With
 link is shown on the page (and logged) so you can pass it on.
 
 While working on the frontend, `npm run watch:js` and `npm run watch:css` rebuild assets on change;
-the Go binary embeds them, so restart `go run . serve` to pick them up.
+the Go binary embeds them, so restart `make dev` to pick them up.
 
 ## Running with Docker
 
@@ -76,11 +76,16 @@ archive into the `files` volume (or mirror the bucket with any S3 tool).
 
 ## How it works
 
+Code layout: `cmd/notetaker` (entry point and commands), `internal/app` (HTTP handlers, pages,
+permissions), `internal/collab` (live editing), `internal/importer` (document parsing),
+`internal/storage` (S3 client), `internal/db` (migrations). `assets.go` embeds `templates/`,
+`static/` and `migrations/`; frontend sources are in `web/`.
+
 - **Pages** are server-rendered Go templates; htmx boosts navigation and swaps fragments.
 - **Permissions** come from the `effective_role` SQL function: a user's role in a folder is the
   strongest of their workspace role and any share on the folder or its ancestors.
 - **Co-editing**: each note is a Yjs document. The server keeps an ordered log of Yjs updates per
-  note and relays them over a WebSocket (`collab.go` documents the protocol); it never parses
+  note and relays them over a WebSocket (`internal/collab` documents the protocol); it never parses
   them. Clients compact the log into snapshots when asked. Rooms live in memory, so run a single
   server process.
 - **Search** uses a generated `tsvector` with an accent-insensitive configuration and prefix matching.

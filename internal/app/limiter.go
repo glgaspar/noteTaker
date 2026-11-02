@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"net"
@@ -63,7 +63,7 @@ func (l *limiter) clear(key string) {
 
 // clientIP is the address of the connection, or with TRUST_PROXY=true the address the
 // reverse proxy appended to X-Forwarded-For (only enable it behind a proxy that sets it).
-func (s *server) clientIP(r *http.Request) string {
+func (s *Server) clientIP(r *http.Request) string {
 	if s.trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			return strings.TrimSpace(xff[strings.LastIndex(xff, ",")+1:])

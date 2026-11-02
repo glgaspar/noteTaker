@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"archive/zip"
@@ -13,76 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/net/html"
 )
-
-func normalized(t *testing.T, src string) string {
-	t.Helper()
-	body, _, err := parseHTML(strings.NewReader(src))
-	if err != nil {
-		t.Fatal(err)
-	}
-	normalize(body, func(string) *html.Node { return nil }, nil)
-	out, err := renderChildren(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func TestNormalize(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"legacy evernote todo keeps its text",
-			`<div><en-todo checked="true"/>Buy milk</div>`,
-			`<div><ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>Buy milk</p></li></ul></div>`},
-		{"current evernote checklist",
-			`<ul style="--en-todo:true;"><li style="--en-checked:false;">Open</li></ul>`,
-			`<ul data-type="taskList"><li data-type="taskItem" data-checked="false">Open</li></ul>`},
-		{"evernote code block",
-			`<div style="-en-codeblock:true;"><div>a := 1</div><div>b := 2</div></div>`,
-			"<pre><code>a := 1\nb := 2</code></pre>"},
-		{"markdown task item",
-			`<ul><li><input type="checkbox" checked disabled> done</li></ul>`,
-			`<ul data-type="taskList"><li data-type="taskItem" data-checked="true"> done</li></ul>`},
-		{"scripts, handlers and unsafe links are removed",
-			`<p onclick="x()">Hi <a href="javascript:alert(1)">a</a><a href="https://ok.example">b</a></p><script>x()</script><iframe></iframe>`,
-			`<p>Hi <a>a</a><a href="https://ok.example">b</a></p>`},
-		{"code language is kept, other classes are not",
-			`<pre class="x"><code class="language-go">x</code></pre>`,
-			`<pre><code class="language-go">x</code></pre>`},
-		{"missing en-media is dropped with what follows kept",
-			`<div><en-media hash="abc"/>after</div>`,
-			`<div>after</div>`},
-	}
-	for _, c := range cases {
-		if got := normalized(t, c.in); got != c.want {
-			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
-		}
-	}
-}
-
-func TestImportHelpers(t *testing.T) {
-	if got := resolveRef("notes/daily", "../img/a%20b.png#x"); got != "notes/img/a b.png" {
-		t.Errorf("resolveRef = %q", got)
-	}
-	for ref, want := range map[string]bool{"img/a.png": true, "../a.pdf": true, "https://x/a.png": false, "/files/1": false, "#top": false, "data:x": false} {
-		if isRelative(ref) != want {
-			t.Errorf("isRelative(%q) = %v", ref, !want)
-		}
-	}
-	res, ok := dataURI("data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png!")))
-	if !ok || res.mime != "image/png" || string(res.data) != "png!" {
-		t.Errorf("dataURI = %+v %v", res, ok)
-	}
-	body, err := markdownToHTML([]byte("![[logo.png|100]]"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out, _ := renderChildren(body); !strings.Contains(out, `<img src="logo.png"`) {
-		t.Errorf("wiki embed not converted: %s", out)
-	}
-}
 
 // importFiles uploads files to the import form and waits for the background job to finish.
 func (u *user) importFiles(ws int64, files map[string][]byte) string {
@@ -204,11 +135,11 @@ func TestImportZipWithStorage(t *testing.T) {
 	// Deleting the note leaves files in the bucket until the sweep removes them.
 	id := dbInt(t, `SELECT id FROM notes WHERE title = 'day' AND workspace_id = $1`, ws)
 	ann.post(fmt.Sprintf("/notes/%d/delete", id), nil)
-	removed, err := sweepFiles(context.Background(), testDB, testFiles)
+	removed, err := SweepFiles(context.Background(), testDB, testFiles)
 	if err != nil || removed < 3 {
 		t.Errorf("sweep removed %d (err %v), want at least 3", removed, err)
 	}
-	if removed, _ := sweepFiles(context.Background(), testDB, testFiles); removed != 0 {
+	if removed, _ := SweepFiles(context.Background(), testDB, testFiles); removed != 0 {
 		t.Errorf("second sweep removed %d live files", removed)
 	}
 }

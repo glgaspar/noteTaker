@@ -1,7 +1,6 @@
-package main
+package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +10,8 @@ import (
 	"maps"
 	"mime"
 	"net/http"
-	"os"
+	"notetaker/internal/importer"
+	"notetaker/internal/storage"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,42 +19,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 )
-
-// storage keeps attachment bytes in an S3-compatible bucket (RustFS); rows live in attachments.
-type storage struct {
-	client *minio.Client
-	bucket string
-}
-
-// newStorage connects to S3_ENDPOINT, creating the bucket if needed. It returns nil when
-// S3_ENDPOINT is not set; attachments are then unavailable.
-func newStorage(ctx context.Context) (*storage, error) {
-	endpoint := os.Getenv("S3_ENDPOINT")
-	if endpoint == "" {
-		return nil, nil
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY"), ""),
-		Secure: os.Getenv("S3_SSL") == "true",
-	})
-	if err != nil {
-		return nil, err
-	}
-	st := &storage{client: client, bucket: env("S3_BUCKET", "notetaker")}
-	exists, err := client.BucketExists(ctx, st.bucket)
-	if err == nil && !exists {
-		err = client.MakeBucket(ctx, st.bucket, minio.MakeBucketOptions{})
-	}
-	return st, err
-}
 
 func objectKey(id int64) string { return fmt.Sprintf("attachments/%d", id) }
 
 // putAttachment stores a file for a note and returns the attachment id.
-func (s *server) putAttachment(ctx context.Context, noteID int64, name, mimeType string, data []byte) (int64, error) {
+func (s *Server) putAttachment(ctx context.Context, noteID int64, name, mimeType string, data []byte) (int64, error) {
 	if s.files == nil {
 		return 0, errors.New("attachment storage is not configured")
 	}
@@ -63,18 +33,17 @@ func (s *server) putAttachment(ctx context.Context, noteID int64, name, mimeType
 		noteID, name, mimeType, len(data)).Scan(&id); err != nil {
 		return 0, err
 	}
-	if _, err := s.files.client.PutObject(ctx, s.files.bucket, objectKey(id), bytes.NewReader(data), int64(len(data)),
-		minio.PutObjectOptions{ContentType: mimeType}); err != nil {
+	if err := s.files.Put(ctx, objectKey(id), mimeType, data); err != nil {
 		s.db.Exec(ctx, `DELETE FROM attachments WHERE id = $1`, id)
 		return 0, err
 	}
 	return id, nil
 }
 
-const maxUpload = 25 << 20
+const maxUpload = importer.MaxFile
 
 // uploadFile stores a file pasted, dropped or attached in the editor.
-func (s *server) uploadFile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.editable(w, r, noteRole); !ok {
 		return
 	}
@@ -110,7 +79,7 @@ func (s *server) uploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveFile streams an attachment to users who can see its note.
-func (s *server) serveFile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var noteID int64
 	var name, mimeType string
@@ -133,17 +102,12 @@ func (s *server) serveFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	obj, err := s.files.client.GetObject(ctx, s.files.bucket, objectKey(pathID(r, "id")), minio.GetObjectOptions{})
+	obj, modified, err := s.files.Open(ctx, objectKey(pathID(r, "id")))
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	defer obj.Close()
-	info, err := obj.Stat()
-	if err != nil {
-		serverError(w, err)
-		return
-	}
 	disposition := "attachment"
 	if strings.HasPrefix(mimeType, "image/") {
 		disposition = "inline"
@@ -154,13 +118,13 @@ func (s *server) serveFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	http.ServeContent(w, r, name, info.LastModified, obj)
+	http.ServeContent(w, r, name, modified, obj)
 }
 
-// sweepFiles deletes stored files whose attachment row is gone (deleted notes, folders or
+// SweepFiles deletes stored files whose attachment row is gone (deleted notes, folders or
 // workspaces cascade to the rows, not to the bucket). Rows are written before their file,
 // so a file without a row is always garbage.
-func sweepFiles(ctx context.Context, db *pgxpool.Pool, st *storage) (int, error) {
+func SweepFiles(ctx context.Context, db *pgxpool.Pool, st *storage.Storage) (int, error) {
 	removed := 0
 	batch := map[int64]string{}
 	flush := func() error {
@@ -177,7 +141,7 @@ func sweepFiles(ctx context.Context, db *pgxpool.Pool, st *storage) (int, error)
 			delete(batch, id)
 		}
 		for _, key := range batch {
-			if err := st.client.RemoveObject(ctx, st.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+			if err := st.Remove(ctx, key); err != nil {
 				return err
 			}
 			removed++
@@ -185,28 +149,27 @@ func sweepFiles(ctx context.Context, db *pgxpool.Pool, st *storage) (int, error)
 		clear(batch)
 		return nil
 	}
-	for obj := range st.client.ListObjects(ctx, st.bucket, minio.ListObjectsOptions{Prefix: "attachments/", Recursive: true}) {
-		if obj.Err != nil {
-			return removed, obj.Err
-		}
-		id, err := strconv.ParseInt(strings.TrimPrefix(obj.Key, "attachments/"), 10, 64)
+	err := st.List(ctx, "attachments/", func(key string) error {
+		id, err := strconv.ParseInt(strings.TrimPrefix(key, "attachments/"), 10, 64)
 		if err != nil {
-			continue
+			return nil
 		}
-		batch[id] = obj.Key
+		batch[id] = key
 		if len(batch) == 1000 {
-			if err := flush(); err != nil {
-				return removed, err
-			}
+			return flush()
 		}
+		return nil
+	})
+	if err != nil {
+		return removed, err
 	}
 	return removed, flush()
 }
 
-// sweepFilesEvery runs sweepFiles now and then on an interval, for the life of the process.
-func sweepFilesEvery(db *pgxpool.Pool, st *storage, interval time.Duration) {
+// sweepFilesEvery runs SweepFiles now and then on an interval, for the life of the process.
+func sweepFilesEvery(db *pgxpool.Pool, st *storage.Storage, interval time.Duration) {
 	for {
-		if n, err := sweepFiles(context.Background(), db, st); err != nil {
+		if n, err := SweepFiles(context.Background(), db, st); err != nil {
 			log.Printf("sweep files: %v", err)
 		} else if n > 0 {
 			log.Printf("sweep files: removed %d orphaned files", n)

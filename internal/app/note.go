@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -57,7 +57,7 @@ func workspaceURL(wsID, folderID, noteID int64) string {
 
 // noteList lists the notes of a workspace the user can see, optionally only those directly
 // inside a folder or with a tag.
-func (s *server) noteList(ctx context.Context, userID, wsID, folderID, tagID int64) ([]noteItem, error) {
+func (s *Server) noteList(ctx context.Context, userID, wsID, folderID, tagID int64) ([]noteItem, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, title, left(content_text, 120), updated_at FROM notes n
 		WHERE workspace_id = $1 AND ($2 = 0 OR folder_id = $2)
@@ -71,7 +71,7 @@ func (s *server) noteList(ctx context.Context, userID, wsID, folderID, tagID int
 }
 
 // loadNote returns a note of the workspace, or nil if there is none the user can see with that id.
-func (s *server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*note, error) {
+func (s *Server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*note, error) {
 	n := note{ID: noteID}
 	err := s.db.QueryRow(ctx, `
 		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(n.import_html, ''),
@@ -87,7 +87,7 @@ func (s *server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*not
 	return &n, err
 }
 
-func (s *server) createNote(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
 	folderID := formID(r, "folder_id")
 	ws, ok := s.container(w, r, pathID(r, "id"), folderID)
 	if !ok {
@@ -102,7 +102,7 @@ func (s *server) createNote(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, workspaceURL(ws.ID, orZero(folderID), id))
 }
 
-func (s *server) saveNote(w http.ResponseWriter, r *http.Request) {
+func (s *Server) saveNote(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.editable(w, r, noteRole); !ok {
 		return
 	}
@@ -127,7 +127,7 @@ func (s *server) saveNote(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) moveNote(w http.ResponseWriter, r *http.Request) {
+func (s *Server) moveNote(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return
@@ -146,11 +146,11 @@ func (s *server) moveNote(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	s.hub.kickNotes([]int64{id}) // who may access it can change with the folder
+	s.hub.KickNotes([]int64{id}) // who may access it can change with the folder
 	redirect(w, r, workspaceURL(ws.ID, orZero(folderID), id))
 }
 
-func (s *server) deleteNote(w http.ResponseWriter, r *http.Request) {
+func (s *Server) deleteNote(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -52,7 +52,7 @@ func redirect(w http.ResponseWriter, r *http.Request, url string) {
 	http.Redirect(w, r, url, http.StatusSeeOther)
 }
 
-func (s *server) startSession(ctx context.Context, w http.ResponseWriter, userID int64) error {
+func (s *Server) startSession(ctx context.Context, w http.ResponseWriter, userID int64) error {
 	token := rand.Text()
 	if _, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`); err != nil {
 		return err
@@ -68,7 +68,7 @@ func (s *server) startSession(ctx context.Context, w http.ResponseWriter, userID
 	return nil
 }
 
-func (s *server) requireUser(next http.Handler) http.Handler {
+func (s *Server) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c, err := r.Cookie(sessionCookie); err == nil {
 			var u User
@@ -86,7 +86,7 @@ func (s *server) requireUser(next http.Handler) http.Handler {
 	})
 }
 
-func (s *server) requireAdmin(next http.Handler) http.Handler {
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return s.requireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !currentUser(r).IsAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -96,11 +96,11 @@ func (s *server) requireAdmin(next http.Handler) http.Handler {
 	}))
 }
 
-func (s *server) loginPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "login.html", nil)
 }
 
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	email := normalizeEmail(r.FormValue("email"))
 	ip := s.clientIP(r)
 	account := email + "|" + ip // per email and address, so others cannot lock a user out
@@ -140,7 +140,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/")
 }
 
-func (s *server) logout(w http.ResponseWriter, r *http.Request) {
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		s.db.Exec(r.Context(), `DELETE FROM sessions WHERE token_hash = $1`, hashToken(c.Value))
 	}

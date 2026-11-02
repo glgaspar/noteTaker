@@ -1,10 +1,11 @@
-package main
+package app
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"notetaker/internal/collab"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func seqOf(msg []byte) uint64 { return binary.BigEndian.Uint64(msg[1:9]) }
 
 // awareness builds an awareness message for one client, as y-protocols encodes it.
 func awareness(clientID, clock uint64, state string) []byte {
-	msg := binary.AppendUvarint([]byte{msgAwareness}, 1)
+	msg := binary.AppendUvarint([]byte{collab.MsgAwareness}, 1)
 	msg = binary.AppendUvarint(msg, clientID)
 	msg = binary.AppendUvarint(msg, clock)
 	msg = binary.AppendUvarint(msg, uint64(len(state)))
@@ -103,82 +104,72 @@ func TestCollabProtocol(t *testing.T) {
 
 	// The first editor on an empty log is asked to seed it; nobody else is.
 	o := owner.connect(note)
-	if got := o.must(msgSynced); got[1] != 1 {
+	if got := o.must(collab.MsgSynced); got[1] != 1 {
 		t.Fatal("first editor was not asked to seed")
 	}
 	e := editor.connect(note)
-	if got := e.must(msgSynced); got[1] != 0 {
+	if got := e.must(collab.MsgSynced); got[1] != 0 {
 		t.Fatal("second editor was asked to seed too")
 	}
 
 	// Updates are stored, relayed with their seq, and acknowledged to the sender.
-	o.send(append([]byte{msgUpdate}, "u1"...)...)
-	relayed := e.must(msgUpdate)
+	o.send(append([]byte{collab.MsgUpdate}, "u1"...)...)
+	relayed := e.must(collab.MsgUpdate)
 	if !bytes.Equal(relayed[9:], []byte("u1")) {
 		t.Fatalf("relayed %q", relayed[9:])
 	}
-	if ack := o.must(msgAck); seqOf(ack) != seqOf(relayed) {
+	if ack := o.must(collab.MsgAck); seqOf(ack) != seqOf(relayed) {
 		t.Fatal("ack seq differs from relayed seq")
 	}
 
 	// Late joiners get the log first, plus the presence of people already there.
 	o.send(awareness(7, 1, `{"user":{"name":"Owner"}}`)...)
-	if got := e.must(msgAwareness); !bytes.Contains(got, []byte("Owner")) {
+	if got := e.must(collab.MsgAwareness); !bytes.Contains(got, []byte("Owner")) {
 		t.Fatal("awareness not relayed")
 	}
 	v := viewer.connect(note)
-	if got := v.must(msgUpdate); !bytes.Equal(got[9:], []byte("u1")) {
+	if got := v.must(collab.MsgUpdate); !bytes.Equal(got[9:], []byte("u1")) {
 		t.Fatal("late joiner did not get the log")
 	}
-	v.must(msgSynced)
-	if got := v.must(msgAwareness); !bytes.Contains(got, []byte("Owner")) {
+	v.must(collab.MsgSynced)
+	if got := v.must(collab.MsgAwareness); !bytes.Contains(got, []byte("Owner")) {
 		t.Fatal("late joiner did not get existing presence")
 	}
 
 	// Viewers' updates are ignored.
 	before := rows()
-	v.send(append([]byte{msgUpdate}, "evil"...)...)
-	if e.next(msgUpdate, 300*time.Millisecond) != nil || rows() != before {
+	v.send(append([]byte{collab.MsgUpdate}, "evil"...)...)
+	if e.next(collab.MsgUpdate, 300*time.Millisecond) != nil || rows() != before {
 		t.Fatal("viewer update was accepted")
 	}
 
 	// Leaving marks the client offline for everyone right away.
 	o.conn.Close(websocket.StatusNormalClosure, "")
-	if got := e.must(msgAwareness); !bytes.HasSuffix(got, []byte("null")) {
+	if got := e.must(collab.MsgAwareness); !bytes.HasSuffix(got, []byte("null")) {
 		t.Fatalf("no offline awareness after leaving: %q", got)
 	}
 
 	// After enough updates the writer is asked for a snapshot, which replaces the log.
 	var last uint64
 	for i := 0; ; i++ {
-		e.send(append([]byte{msgUpdate}, fmt.Sprint("x", i)...)...)
-		last = seqOf(e.must(msgAck))
-		if e.next(msgCompact, 20*time.Millisecond) != nil {
+		e.send(append([]byte{collab.MsgUpdate}, fmt.Sprint("x", i)...)...)
+		last = seqOf(e.must(collab.MsgAck))
+		if e.next(collab.MsgCompact, 20*time.Millisecond) != nil {
 			break
 		}
-		if i > compactEvery {
+		if i > collab.CompactEvery {
 			t.Fatal("never asked to compact")
 		}
 	}
-	snapshot := binary.BigEndian.AppendUint64([]byte{msgSnapshot}, last)
+	snapshot := binary.BigEndian.AppendUint64([]byte{collab.MsgSnapshot}, last)
 	e.send(append(snapshot, "STATE"...)...)
 	time.Sleep(200 * time.Millisecond)
 	if n := rows(); n != 1 {
 		t.Fatalf("log has %d rows after compaction, want 1", n)
 	}
 	fresh := editor.connect(note)
-	if got := fresh.must(msgUpdate); !bytes.Equal(got[9:], []byte("STATE")) {
+	if got := fresh.must(collab.MsgUpdate); !bytes.Equal(got[9:], []byte("STATE")) {
 		t.Fatalf("fresh client got %q, want the snapshot", got[9:])
-	}
-}
-
-func TestAwarenessGone(t *testing.T) {
-	gone := awarenessGone(awareness(300, 5, `{"x":1}`))
-	if !bytes.Equal(gone, awareness(300, 6, "null")) {
-		t.Fatalf("got %v", gone)
-	}
-	if awarenessGone(nil) != nil || awarenessGone([]byte{msgAwareness, 2}) != nil {
-		t.Fatal("malformed input should give nil")
 	}
 }
 
@@ -192,7 +183,7 @@ func TestAccessChangeDisconnects(t *testing.T) {
 	note := owner.note(ws, f, "N", "")
 	owner.share(fmt.Sprintf("/folders/%d/share", f), guest.Email, "editor")
 	g := guest.connect(note)
-	g.must(msgSynced)
+	g.must(collab.MsgSynced)
 
 	owner.post(fmt.Sprintf("/notes/%d/move", note), map[string][]string{"folder_id": {""}}) // out of the share
 	deadline := time.After(3 * time.Second)

@@ -10,11 +10,11 @@ db:
 
 dev: db
 	npm run build
-	go run . serve
+	go run ./cmd/notetaker serve
 
 build:
 	npm run build
-	go build -o bin/notetaker .
+	go build -o bin/notetaker ./cmd/notetaker
 
 # Go integration tests; they recreate the notetaker_test database on the compose Postgres.
 test: db

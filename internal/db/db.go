@@ -1,25 +1,22 @@
-package main
+// Package db applies the SQL migrations.
+package db
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io/fs"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed migrations/*.sql
-var migrationFS embed.FS
-
-// migrate applies every migrations/*.sql file not yet recorded, in name order.
-func migrate(ctx context.Context, db *pgxpool.Pool) error {
+// Migrate applies every migrations/*.sql file in fsys not yet recorded, in name order.
+func Migrate(ctx context.Context, db *pgxpool.Pool, fsys fs.FS) error {
 	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		name text PRIMARY KEY,
 		applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	entries, err := fs.ReadDir(migrationFS, "migrations")
+	entries, err := fs.ReadDir(fsys, "migrations")
 	if err != nil {
 		return err
 	}
@@ -31,7 +28,7 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 		if done {
 			continue
 		}
-		sql, err := migrationFS.ReadFile("migrations/" + e.Name())
+		sql, err := fs.ReadFile(fsys, "migrations/"+e.Name())
 		if err != nil {
 			return err
 		}

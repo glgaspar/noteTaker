@@ -13,7 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=assets /src/static/dist static/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /notetaker .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /notetaker ./cmd/notetaker
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /notetaker /notetaker

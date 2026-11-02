@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -18,11 +18,11 @@ type searchResult struct {
 	WorkspaceID int64
 	Workspace   string
 	FolderID    int64
-	Title     string
-	Snippet   template.HTML
-	Folder    string
-	Author    string
-	UpdatedAt time.Time
+	Title       string
+	Snippet     template.HTML
+	Folder      string
+	Author      string
+	UpdatedAt   time.Time
 }
 
 type author struct {
@@ -69,7 +69,7 @@ const searchPageSize = 50
 
 // search returns one page of results in a workspace, or in all of the user's with wsID 0. It
 // fetches one extra row so callers can tell whether there is a next page.
-func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *http.Request) ([]searchResult, error) {
+func (s *Server) search(ctx context.Context, userID, wsID int64, page int, r *http.Request) ([]searchResult, error) {
 	dateField := "updated_at"
 	if r.FormValue("date_field") == "created" {
 		dateField = "created_at"
@@ -128,7 +128,7 @@ func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *ht
 }
 
 // authors lists the authors of notes the user can see in a workspace.
-func (s *server) authors(ctx context.Context, userID, wsID int64) ([]author, error) {
+func (s *Server) authors(ctx context.Context, userID, wsID int64) ([]author, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT u.id, u.name FROM notes n JOIN users u ON u.id = n.author_id
 		WHERE n.workspace_id = $1 AND effective_role($2, n.workspace_id, n.folder_id) IS NOT NULL
@@ -139,7 +139,7 @@ func (s *server) authors(ctx context.Context, userID, wsID int64) ([]author, err
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[author])
 }
 
-func (s *server) searchPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := currentUser(r)
 	data, ok := s.sidebar(w, r)

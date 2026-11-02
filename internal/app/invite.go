@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"crypto/rand"
@@ -20,7 +20,7 @@ type adminMsg struct {
 }
 
 // sendLink emails a link and returns the feedback for the admin page.
-func (s *server) sendLink(to, subject, body, link, notice string) adminMsg {
+func (s *Server) sendLink(to, subject, body, link, notice string) adminMsg {
 	if err := s.sendMail(to, subject, fmt.Sprintf(body, link)); err != nil {
 		log.Printf("send mail to %s: %v", to, err)
 		return adminMsg{Error: "The email could not be sent. Share this link instead:", Link: link}
@@ -45,11 +45,11 @@ type inviteRow struct {
 	ExpiresAt time.Time
 }
 
-func (s *server) adminUsers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	s.renderAdmin(w, r, adminMsg{})
 }
 
-func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMsg) {
+func (s *Server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMsg) {
 	ctx := r.Context()
 	var users []userRow
 	rows, err := s.db.Query(ctx, `SELECT id, email, name, is_admin, disabled_at IS NOT NULL, created_at FROM users ORDER BY created_at`)
@@ -84,7 +84,7 @@ func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMs
 	})
 }
 
-func (s *server) createInvite(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	email := normalizeEmail(r.FormValue("email"))
 	if addr, err := mail.ParseAddress(email); err != nil || addr.Address != email {
@@ -114,7 +114,7 @@ func (s *server) createInvite(w http.ResponseWriter, r *http.Request) {
 		s.baseURL+"/invite/"+token, "Invite sent to "+email+"."))
 }
 
-func (s *server) invitePage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) invitePage(w http.ResponseWriter, r *http.Request) {
 	var email string
 	err := s.db.QueryRow(r.Context(), `SELECT email FROM invites WHERE token_hash = $1 AND expires_at > now()`,
 		hashToken(r.PathValue("token"))).Scan(&email)
@@ -125,7 +125,7 @@ func (s *server) invitePage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "invite.html", map[string]any{"Email": email, "Token": r.PathValue("token")})
 }
 
-func (s *server) acceptInvite(w http.ResponseWriter, r *http.Request) {
+func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	token := r.PathValue("token")
 	name := r.FormValue("name")
@@ -178,7 +178,7 @@ func (s *server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 
 // setDisabled disables or re-enables a user. Disabling signs them out everywhere; their notes
 // and memberships stay.
-func (s *server) setDisabled(disable bool) http.HandlerFunc {
+func (s *Server) setDisabled(disable bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		id := pathID(r, "id")
@@ -199,7 +199,7 @@ func (s *server) setDisabled(disable bool) http.HandlerFunc {
 				serverError(w, err)
 				return
 			}
-			s.hub.kick(id)
+			s.hub.Kick(id)
 		}
 		redirect(w, r, "/admin/users")
 	}

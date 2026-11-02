@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type noteTags struct {
 }
 
 // workspaceTags lists the tags on notes the user can see, with their note counts.
-func (s *server) workspaceTags(ctx context.Context, userID, wsID int64) ([]tag, error) {
+func (s *Server) workspaceTags(ctx context.Context, userID, wsID int64) ([]tag, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT t.id, t.name, count(*)::int FROM tags t
 		JOIN note_tags nt ON nt.tag_id = t.id JOIN notes n ON n.id = nt.note_id
@@ -35,7 +35,7 @@ func (s *server) workspaceTags(ctx context.Context, userID, wsID int64) ([]tag, 
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[tag])
 }
 
-func (s *server) noteTags(ctx context.Context, noteID int64, canEdit bool) (noteTags, error) {
+func (s *Server) noteTags(ctx context.Context, noteID int64, canEdit bool) (noteTags, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT t.id, t.name, 0 FROM tags t JOIN note_tags nt ON nt.tag_id = t.id
 		WHERE nt.note_id = $1 ORDER BY lower(t.name)`, noteID)
@@ -46,7 +46,7 @@ func (s *server) noteTags(ctx context.Context, noteID int64, canEdit bool) (note
 	return noteTags{NoteID: noteID, CanEdit: canEdit, Tags: tags}, err
 }
 
-func (s *server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID int64) {
+func (s *Server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID int64) {
 	nt, err := s.noteTags(r.Context(), noteID, true)
 	if err != nil {
 		serverError(w, err)
@@ -57,7 +57,7 @@ func (s *server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID i
 }
 
 // tagNote adds a tag to a note, creating the tag in the workspace if needed.
-func (s *server) tagNote(ctx context.Context, wsID, noteID int64, name string) error {
+func (s *Server) tagNote(ctx context.Context, wsID, noteID int64, name string) error {
 	_, err := s.db.Exec(ctx, `
 		WITH t AS (
 			INSERT INTO tags (workspace_id, name) VALUES ($1, $2)
@@ -69,7 +69,7 @@ func (s *server) tagNote(ctx context.Context, wsID, noteID int64, name string) e
 	return err
 }
 
-func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
+func (s *Server) addTag(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
 		return
@@ -84,7 +84,7 @@ func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
 	s.renderNoteTags(w, r, noteID)
 }
 
-func (s *server) removeTag(w http.ResponseWriter, r *http.Request) {
+func (s *Server) removeTag(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.editable(w, r, noteRole); !ok {
 		return
 	}
