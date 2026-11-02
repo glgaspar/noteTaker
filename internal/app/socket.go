@@ -22,5 +22,6 @@ func (s *Server) noteSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	s.hub.Serve(r.Context(), conn, s.db, noteID, currentUser(r).ID, ws.CanEdit())
+	user := currentUser(r)
+	s.hub.Serve(r.Context(), conn, s.db, noteID, user.ID, user.Name, string(avatarColor(user.ID)), ws.CanEdit())
 }

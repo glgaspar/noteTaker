@@ -24,3 +24,21 @@ func TestAwarenessGone(t *testing.T) {
 		t.Fatal("malformed input should give nil")
 	}
 }
+
+func TestOwnAwareness(t *testing.T) {
+	c := &client{name: "Real Name", color: "#2563eb"}
+	got := c.ownAwareness(awareness(42, 3, `{"user":{"name":"Admin","color":"red; background:url(x)"},"cursor":1}`))
+	want := awareness(42, 3, `{"cursor":1,"user":{"color":"#2563eb","name":"Real Name"}}`)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("identity not replaced:\n got %q\nwant %q", got, want)
+	}
+	if c.ownAwareness(awareness(7, 1, `{"user":{}}`)) != nil {
+		t.Error("awareness for another client's ID was relayed")
+	}
+	if got := c.ownAwareness(awareness(42, 4, "null")); !bytes.Equal(got, awareness(42, 4, "null")) {
+		t.Error("going offline must pass through")
+	}
+	if c.ownAwareness([]byte{MsgAwareness, 1, 42}) != nil {
+		t.Error("truncated message accepted")
+	}
+}

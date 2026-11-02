@@ -4,6 +4,7 @@ package collab
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"log"
 	"slices"
 	"sync"
@@ -85,6 +86,10 @@ func (h *Hub) disconnect(inRoom func(*room) bool, match func(*client) bool) {
 
 type client struct {
 	userID    int64
+	name      string // shown to others; the server sets it, so nobody can pose as someone else
+	color     string
+	clientID  uint64 // the Yjs client ID this connection speaks for, learned from its first awareness
+	knowsID   bool
 	send      chan []byte
 	canEdit   bool
 	closed    bool   // guarded by room.mu
@@ -214,6 +219,61 @@ func awarenessGone(msg []byte) []byte {
 	return append(out, "null"...)
 }
 
+// ownAwareness keeps only the awareness entry of the connection's own Yjs client and replaces
+// its "user" field with the authenticated name and color. Without this, a client could show
+// up as someone else, or hide or move other people's cursors. It returns nil when nothing is
+// left to relay. The payload is lib0-encoded: count, then per client its ID, clock and JSON.
+func (c *client) ownAwareness(msg []byte) []byte {
+	b := msg[1:]
+	next := func() (uint64, bool) {
+		v, n := binary.Uvarint(b)
+		if n <= 0 {
+			return 0, false
+		}
+		b = b[n:]
+		return v, true
+	}
+	count, ok := next()
+	if !ok {
+		return nil
+	}
+	var entries []byte
+	kept := uint64(0)
+	for range count {
+		id, ok1 := next()
+		clock, ok2 := next()
+		size, ok3 := next()
+		if !ok1 || !ok2 || !ok3 || size > uint64(len(b)) {
+			return nil
+		}
+		state := b[:size]
+		b = b[size:]
+		if !c.knowsID {
+			c.clientID, c.knowsID = id, true
+		}
+		if id != c.clientID {
+			continue
+		}
+		if string(state) != "null" {
+			var fields map[string]any
+			if json.Unmarshal(state, &fields) != nil {
+				return nil
+			}
+			fields["user"] = map[string]string{"name": c.name, "color": c.color}
+			state, _ = json.Marshal(fields)
+		}
+		entries = binary.AppendUvarint(entries, id)
+		entries = binary.AppendUvarint(entries, clock)
+		entries = binary.AppendUvarint(entries, uint64(len(state)))
+		entries = append(entries, state...)
+		kept++
+	}
+	if kept == 0 {
+		return nil
+	}
+	return append(binary.AppendUvarint([]byte{MsgAwareness}, kept), entries...)
+}
+
 func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []byte) error {
 	if len(msg) == 0 {
 		return nil
@@ -222,8 +282,10 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 	defer rm.mu.Unlock()
 	switch msg[0] {
 	case MsgAwareness:
-		c.awareness = msg
-		rm.broadcast(c, msg)
+		if msg = c.ownAwareness(msg); msg != nil {
+			c.awareness = msg
+			rm.broadcast(c, msg)
+		}
 	case MsgUpdate:
 		if !c.canEdit {
 			return nil
@@ -267,13 +329,14 @@ func (rm *room) handle(ctx context.Context, db *pgxpool.Pool, c *client, msg []b
 }
 
 // Serve runs one editor's connection to a note until it closes.
-func (h *Hub) Serve(ctx context.Context, conn *websocket.Conn, db *pgxpool.Pool, noteID, userID int64, canEdit bool) {
+// name and color are what other editors see for this user.
+func (h *Hub) Serve(ctx context.Context, conn *websocket.Conn, db *pgxpool.Pool, noteID, userID int64, name, color string, canEdit bool) {
 	defer conn.CloseNow()
 	conn.SetReadLimit(16 << 20)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	c := &client{userID: userID, send: make(chan []byte, 256), canEdit: canEdit}
+	c := &client{userID: userID, name: name, color: color, send: make(chan []byte, 256), canEdit: canEdit}
 	go func() {
 		defer cancel()
 		for msg := range c.send {

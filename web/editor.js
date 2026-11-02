@@ -205,19 +205,20 @@ export function mountEditor(el) {
       .filter(([clientId, state]) => clientId !== doc.clientID && state.user && !seen.has(state.user.name) && seen.add(state.user.name))
       .map(([, state]) => state.user);
     presence.replaceChildren(
-      ...others.map(({ name, color }) =>
-        Object.assign(document.createElement("span"), {
-          className: "grid size-7 place-items-center rounded-full text-[11px] font-semibold text-white ring-2 ring-[var(--canvas)]",
-          textContent: name
-            .split(/\s+/)
-            .map((w) => w[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase(),
-          title: `${name} is here`,
-          style: `background:${color}`,
-        }),
-      ),
+      ...others.map(({ name, color }) => {
+        const el = document.createElement("span");
+        el.className = "grid size-7 place-items-center rounded-full text-[11px] font-semibold text-white ring-2 ring-[var(--canvas)]";
+        el.textContent = name
+          .split(/\s+/)
+          .map((w) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        el.title = `${name} is here`;
+        // the server sets colors, but never put a value in markup unchecked
+        el.style.background = /^#[0-9a-f]{6}$/i.test(color) ? color : "#888";
+        return el;
+      }),
     );
   });
 

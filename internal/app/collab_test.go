@@ -136,6 +136,17 @@ func TestCollabProtocol(t *testing.T) {
 		t.Fatal("late joiner did not get existing presence")
 	}
 
+	// Presence carries the real account name, whatever the client claims, and a client cannot
+	// speak for another client's ID.
+	e.send(awareness(9, 1, `{"user":{"name":"Owner"}}`)...)
+	if got := o.must(collab.MsgAwareness); !bytes.Contains(got, []byte(`"name":"Editor"`)) || bytes.Contains(got, []byte(`"name":"Owner"`)) {
+		t.Fatalf("spoofed presence relayed: %q", got)
+	}
+	e.send(awareness(7, 2, "null")...) // try to make the owner disappear
+	if o.next(collab.MsgAwareness, 300*time.Millisecond) != nil {
+		t.Fatal("presence for someone else's client was relayed")
+	}
+
 	// Viewers' updates are ignored.
 	before := rows()
 	v.send(append([]byte{collab.MsgUpdate}, "evil"...)...)
