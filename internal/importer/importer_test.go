@@ -74,3 +74,17 @@ func TestImportHelpers(t *testing.T) {
 		t.Errorf("wiki embed not converted: %s", out)
 	}
 }
+
+func TestSplitFrontMatter(t *testing.T) {
+	fm, body := SplitFrontMatter([]byte("---\ntitle: \"Say \\\"hi\\\"\"\ntags: [\"a b\", \"c\"]\ncreated: 2024-02-10T15:30:00Z\nupdated: 2024-03-01\n---\n\n# Body\n"))
+	if fm.Title != `Say "hi"` || len(fm.Tags) != 2 || fm.Tags[0] != "a b" || fm.Created == nil || fm.Updated == nil || string(body) != "# Body\n" {
+		t.Errorf("ours: %+v %q", fm, body)
+	}
+	fm, body = SplitFrontMatter([]byte("---\ntitle: Plain title\ntags:\n  - work\n  - '#idea'\n---\ntext"))
+	if fm.Title != "Plain title" || len(fm.Tags) != 2 || fm.Tags[1] != "idea" || string(body) != "text" {
+		t.Errorf("obsidian: %+v %q", fm, body)
+	}
+	if _, body := SplitFrontMatter([]byte("no front matter\n---\n")); string(body) != "no front matter\n---\n" {
+		t.Error("text without front matter changed")
+	}
+}

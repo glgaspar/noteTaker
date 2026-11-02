@@ -329,7 +329,9 @@ func (s *Server) importDoc(ctx context.Context, wsID int64, folderID *int64, use
 	var err error
 	switch ext {
 	case ".md", ".markdown":
-		n.Body, err = importer.MarkdownToHTML(src)
+		fm, body := importer.SplitFrontMatter(src)
+		n.Title, n.Tags, n.Created, n.Updated = cmp.Or(fm.Title, name), fm.Tags, fm.Created, fm.Updated
+		n.Body, err = importer.MarkdownToHTML(body)
 	case ".html", ".htm":
 		var title string
 		n.Body, title, err = importer.ParseHTML(bytes.NewReader(src))
