@@ -1,0 +1,37 @@
+{{define "main"}}
+<div class="flex min-h-0 flex-1">
+  {{template "sidebar" .}}
+  <section class="flex-1 overflow-auto bg-white">
+    <div class="mx-auto max-w-xl px-6 py-8">
+      <h1 class="mb-1 text-2xl font-semibold">Import notes</h1>
+      <p class="mb-6 text-sm text-stone-600">
+        Evernote exports (.enex), Markdown (.md), HTML and text files. Each .enex file becomes a folder.
+      </p>
+
+      {{with .Stats}}
+      <div class="mb-6 rounded border border-stone-200 bg-stone-50 p-4 text-sm">
+        <p class="font-medium">Imported {{.Notes}} note{{if ne .Notes 1}}s{{end}}{{if .Files}} and {{.Files}} attachment{{if ne .Files 1}}s{{end}}{{end}}.</p>
+        {{if .Missing}}<p class="mt-1 text-amber-700">{{.Missing}} attachment{{if ne .Missing 1}}s were{{else}} was{{end}} skipped{{if not $.Storage}} because file storage is not configured{{end}}.</p>{{end}}
+        {{with .Skipped}}<p class="mt-1 text-amber-700">Unsupported files: {{range $i, $f := .}}{{if $i}}, {{end}}{{$f}}{{end}}</p>{{end}}
+        {{range .Errors}}<p class="mt-1 text-red-700">{{.}}</p>{{end}}
+      </div>
+      {{end}}
+
+      <form method="post" action="/w/{{.Workspace.ID}}/import" enctype="multipart/form-data" hx-boost="false" class="space-y-4 text-sm">
+        <label class="block">Files
+          <input name="files" type="file" multiple required accept=".enex,.md,.markdown,.html,.htm,.txt"
+            class="mt-1 block w-full rounded border border-stone-300 p-2">
+        </label>
+        <label class="block">Into
+          <select name="folder_id" class="mt-1 block w-full rounded border border-stone-300 px-2 py-2">
+            {{if .Workspace.CanEdit}}<option value="">Workspace root</option>{{end}}
+            {{range .Folders}}{{if .CanEdit}}<option value="{{.ID}}" {{if eq .ID $.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}{{end}}
+          </select>
+        </label>
+        {{if not .Storage}}<p class="text-amber-700">File storage is not configured, so images and attachments will be skipped.</p>{{end}}
+        <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Import</button>
+      </form>
+    </div>
+  </section>
+</div>
+{{end}}

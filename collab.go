@@ -16,10 +16,11 @@ import (
 // client replace the log with a snapshot of its full state (compaction).
 //
 // Every message starts with a type byte.
-//   client -> server: update [yjs update], awareness [payload], snapshot [8-byte seq][yjs state]
-//   server -> client: update [8-byte seq][yjs update], awareness [payload],
-//                     synced [1 if this client must seed the doc from the note JSON], compact,
-//                     ack [8-byte seq of the client's own update]
+//
+//	client -> server: update [yjs update], awareness [payload], snapshot [8-byte seq][yjs state]
+//	server -> client: update [8-byte seq][yjs update], awareness [payload],
+//	                  synced [1 if this client must seed the doc from the note JSON], compact,
+//	                  ack [8-byte seq of the client's own update]
 const (
 	msgUpdate    = 0
 	msgAwareness = 1

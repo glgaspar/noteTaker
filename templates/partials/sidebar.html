@@ -16,6 +16,7 @@
       <a href="/w/{{.Workspace.ID}}/members" class="block rounded px-2 py-1 hover:bg-stone-100">Members…</a>
       {{end}}
       {{if .Workspace.CanEdit}}
+      <a href="/w/{{.Workspace.ID}}/import" class="block rounded px-2 py-1 hover:bg-stone-100">Import notes…</a>
       <form method="post" action="/w/{{.Workspace.ID}}/rename" class="flex gap-1">
         <input name="name" value="{{.Workspace.Name}}" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
         <button class="rounded border border-stone-300 px-2 py-1">Rename</button>
@@ -59,6 +60,9 @@
             <input name="name" placeholder="New subfolder" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
             <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
           </form>
+          {{end}}
+          {{if .CanEdit}}
+          <a href="/w/{{$.Workspace.ID}}/import?folder={{.ID}}" class="block rounded px-2 py-1 hover:bg-stone-100">Import here…</a>
           {{end}}
           {{if $.Workspace.CanEdit}}
           <a href="/folders/{{.ID}}/share" class="block rounded px-2 py-1 hover:bg-stone-100">Share…</a>

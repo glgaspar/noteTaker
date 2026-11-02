@@ -10,5 +10,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
 
+  # S3-compatible storage for attachments (optional; the app runs without it)
+  files:
+    image: rustfs/rustfs:1.0.4
+    environment:
+      RUSTFS_ACCESS_KEY: notetaker
+      RUSTFS_SECRET_KEY: notetaker-secret
+    ports:
+      - "9000:9000"
+    volumes:
+      - files:/data
+
 volumes:
   pgdata:
+  files:

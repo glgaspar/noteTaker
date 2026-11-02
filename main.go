@@ -27,6 +27,7 @@ type server struct {
 	secure  bool
 	smtp    smtpConfig
 	hub     hub
+	files   *storage // nil when S3 is not configured
 }
 
 func env(key, fallback string) string {
@@ -66,7 +67,15 @@ func main() {
 
 func serve(db *pgxpool.Pool) error {
 	baseURL := strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/")
+	files, err := newStorage(context.Background())
+	if err != nil {
+		return fmt.Errorf("storage: %w", err)
+	}
+	if files == nil {
+		log.Print("S3_ENDPOINT not set; attachments are disabled")
+	}
 	s := &server{
+		files:   files,
 		db:      db,
 		tmpl:    parseTemplates(),
 		baseURL: baseURL,
@@ -94,6 +103,9 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /w/{id}/rename", auth(s.renameWorkspace))
 	mux.Handle("POST /w/{id}/delete", auth(s.deleteWorkspace))
 	mux.Handle("GET /w/{id}/search", auth(s.searchPage))
+	mux.Handle("GET /w/{id}/import", auth(s.importPage))
+	mux.Handle("POST /w/{id}/import", auth(s.importNotes))
+	mux.Handle("GET /files/{id}", auth(s.serveFile))
 	mux.Handle("GET /w/{id}/members", auth(s.workspaceMembers))
 	mux.Handle("POST /w/{id}/members", auth(s.addWorkspaceMember))
 	mux.Handle("POST /w/{id}/members/{user}/delete", auth(s.removeWorkspaceMember))

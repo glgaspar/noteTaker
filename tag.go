@@ -56,6 +56,19 @@ func (s *server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID i
 	s.renderPartial(w, "workspace.html", "note_tags", nt)
 }
 
+// tagNote adds a tag to a note, creating the tag in the workspace if needed.
+func (s *server) tagNote(ctx context.Context, wsID, noteID int64, name string) error {
+	_, err := s.db.Exec(ctx, `
+		WITH t AS (
+			INSERT INTO tags (workspace_id, name) VALUES ($1, $2)
+			ON CONFLICT (workspace_id, name) DO UPDATE SET name = excluded.name
+			RETURNING id
+		)
+		INSERT INTO note_tags (note_id, tag_id) SELECT $3, id FROM t ON CONFLICT DO NOTHING`,
+		wsID, name, noteID)
+	return err
+}
+
 func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.editable(w, r, noteRole)
 	if !ok {
@@ -63,15 +76,7 @@ func (s *server) addTag(w http.ResponseWriter, r *http.Request) {
 	}
 	noteID := pathID(r, "id")
 	if name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(r.FormValue("name")), "#")); name != "" {
-		_, err := s.db.Exec(r.Context(), `
-			WITH t AS (
-				INSERT INTO tags (workspace_id, name) VALUES ($1, $2)
-				ON CONFLICT (workspace_id, name) DO UPDATE SET name = excluded.name
-				RETURNING id
-			)
-			INSERT INTO note_tags (note_id, tag_id) SELECT $3, id FROM t ON CONFLICT DO NOTHING`,
-			ws.ID, name, noteID)
-		if err != nil {
+		if err := s.tagNote(r.Context(), ws.ID, noteID, name); err != nil {
 			serverError(w, err)
 			return
 		}

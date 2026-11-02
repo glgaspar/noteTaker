@@ -3,6 +3,7 @@ import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
+import Image from "@tiptap/extension-image";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import { common, createLowlight } from "lowlight";
@@ -36,12 +37,14 @@ function baseExtensions() {
     TaskList,
     TaskItem.configure({ nested: true }),
     Placeholder.configure({ placeholder: "Start writing…" }),
+    Image,
   ];
 }
 
-// storedContent is the note content saved on the server, used to seed an empty Yjs doc.
+// storedContent is the note content saved on the server (TipTap JSON, or HTML for a fresh
+// import), used to seed an empty Yjs doc.
 function storedContent(el) {
-  return JSON.parse(el.dataset.content || "null");
+  return JSON.parse(el.dataset.content || "null") || el.dataset.importHtml || null;
 }
 
 // mountEditor turns #editor into a collaborative TipTap editor. The Yjs doc (content and
@@ -70,7 +73,10 @@ export function mountEditor(el) {
       if (!seed) return;
       const content = storedContent(el);
       if (title.value) meta.set("title", title.value);
-      if (content) editor.commands.setContent(content);
+      if (content) {
+        editor.commands.setContent(content);
+        save(false, true); // store the JSON right away, without counting it as an edit
+      }
     },
     onStatus: (s) => (status.textContent = s === "offline" ? "Offline, reconnecting…" : ""),
   });
@@ -102,7 +108,7 @@ export function mountEditor(el) {
     presence.textContent = names.length ? `Also here: ${[...new Set(names)].join(", ")}` : "";
   });
 
-  function save(keepalive = false) {
+  function save(keepalive = false, seed = false) {
     clearTimeout(timer);
     timer = null;
     status.textContent = "Saving…";
@@ -110,7 +116,7 @@ export function mountEditor(el) {
       method: "PUT",
       keepalive,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title.value, content: editor.getJSON(), text: editor.getText() }),
+      body: JSON.stringify({ title: title.value, content: editor.getJSON(), text: editor.getText(), seed }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(r.statusText);

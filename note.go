@@ -19,14 +19,15 @@ type noteItem struct {
 }
 
 type note struct {
-	ID        int64
-	FolderID  int64 // 0 when the note is at the workspace root
-	Title     string
-	Content   string // TipTap JSON
-	Author    string
-	UpdatedAt time.Time
-	Role      string
-	Seeded    bool // the note has a live (Yjs) document
+	ID         int64
+	FolderID   int64 // 0 when the note is at the workspace root
+	Title      string
+	Content    string // TipTap JSON
+	ImportHTML string // HTML of an imported note not yet opened in an editor
+	Author     string
+	UpdatedAt  time.Time
+	Role       string
+	Seeded     bool // the note has a live (Yjs) document
 }
 
 func (n note) CanEdit() bool { return canEdit(n.Role) }
@@ -73,12 +74,13 @@ func (s *server) noteList(ctx context.Context, userID, wsID, folderID, tagID int
 func (s *server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*note, error) {
 	n := note{ID: noteID}
 	err := s.db.QueryRow(ctx, `
-		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(u.name, ''), n.updated_at,
+		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(n.import_html, ''),
+			coalesce(u.name, ''), n.updated_at,
 			coalesce(effective_role($3, n.workspace_id, n.folder_id), ''),
 			EXISTS (SELECT 1 FROM note_updates WHERE note_id = n.id)
 		FROM notes n LEFT JOIN users u ON u.id = n.author_id
 		WHERE n.id = $1 AND n.workspace_id = $2`, noteID, wsID, userID).
-		Scan(&n.FolderID, &n.Title, &n.Content, &n.Author, &n.UpdatedAt, &n.Role, &n.Seeded)
+		Scan(&n.FolderID, &n.Title, &n.Content, &n.ImportHTML, &n.Author, &n.UpdatedAt, &n.Role, &n.Seeded)
 	if err == pgx.ErrNoRows || n.Role == "" {
 		return nil, nil
 	}
@@ -108,13 +110,17 @@ func (s *server) saveNote(w http.ResponseWriter, r *http.Request) {
 		Title   string          `json:"title"`
 		Content json.RawMessage `json:"content"`
 		Text    string          `json:"text"`
+		Seed    bool            `json:"seed"` // first save after seeding: not a user edit
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10<<20)).Decode(&body); err != nil {
 		http.Error(w, "invalid note", http.StatusBadRequest)
 		return
 	}
-	if _, err := s.db.Exec(r.Context(), `UPDATE notes SET title = $1, content = $2, content_text = $3, updated_at = now() WHERE id = $4`,
-		strings.TrimSpace(body.Title), body.Content, body.Text, pathID(r, "id")); err != nil {
+	if _, err := s.db.Exec(r.Context(), `
+		UPDATE notes SET title = $1, content = $2, content_text = $3, import_html = NULL,
+			updated_at = CASE WHEN $5 THEN updated_at ELSE now() END
+		WHERE id = $4`,
+		strings.TrimSpace(body.Title), body.Content, body.Text, pathID(r, "id"), body.Seed); err != nil {
 		serverError(w, err)
 		return
 	}
