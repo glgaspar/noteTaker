@@ -68,12 +68,20 @@ export function mountEditor(el) {
   }
 
   const doc = new Y.Doc();
-  const meta = doc.getMap("meta");
+  const ytitle = doc.getText("title"); // shared text, so concurrent title edits merge
   const provider = new NoteProvider(id, doc, {
     onSynced: (seed) => {
+      // Notes from before titles were shared text keep it in the "meta" map; move it once.
+      const meta = doc.getMap("meta");
+      if (ytitle.length === 0 && meta.has("title")) {
+        doc.transact(() => {
+          ytitle.insert(0, meta.get("title"));
+          meta.delete("title");
+        });
+      }
       if (!seed) return;
       const content = storedContent(el);
-      if (title.value) meta.set("title", title.value);
+      if (title.value) ytitle.insert(0, title.value);
       if (content) {
         editor.commands.setContent(content);
         save(false, true); // store the JSON right away, without counting it as an edit
@@ -128,8 +136,25 @@ export function mountEditor(el) {
   doc.on("update", (_, origin) => {
     if (origin !== provider) schedule();
   });
-  meta.observe((e) => {
-    if (!e.transaction.local) title.value = meta.get("title") ?? "";
+  // Remote title edits: update the input, shifting the caret past text inserted before it.
+  ytitle.observe((e) => {
+    if (e.transaction.local) return;
+    let { selectionStart: start, selectionEnd: end } = title;
+    let pos = 0;
+    for (const op of e.delta) {
+      if (op.retain) pos += op.retain;
+      if (op.insert) {
+        if (pos <= start) start += op.insert.length;
+        if (pos <= end) end += op.insert.length;
+        pos += op.insert.length;
+      }
+      if (op.delete) {
+        start -= Math.max(0, Math.min(op.delete, start - pos));
+        end -= Math.max(0, Math.min(op.delete, end - pos));
+      }
+    }
+    title.value = ytitle.toString();
+    if (document.activeElement === title) title.setSelectionRange(start, end);
   });
   provider.awareness.on("change", () => {
     const names = [...provider.awareness.getStates()]
@@ -173,7 +198,19 @@ export function mountEditor(el) {
     language.value = lang;
   }
 
-  title.addEventListener("input", () => meta.set("title", title.value));
+  // Local title edits: apply only the changed span, so they merge with others'.
+  title.addEventListener("input", () => {
+    const before = ytitle.toString();
+    const after = title.value;
+    let start = 0;
+    while (start < before.length && start < after.length && before[start] === after[start]) start++;
+    let end = 0;
+    while (end < before.length - start && end < after.length - start && before.at(-1 - end) === after.at(-1 - end)) end++;
+    doc.transact(() => {
+      if (before.length - start - end > 0) ytitle.delete(start, before.length - start - end);
+      if (after.length - start - end > 0) ytitle.insert(start, after.slice(start, after.length - end));
+    });
+  });
   title.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
