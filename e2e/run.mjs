@@ -120,7 +120,7 @@ try {
   // Saved content is searchable.
   await sleep(1500);
   await admin.goto(`${B}/w/${ws}/search`);
-  await admin.type("section input[name=q]", "hello admin", { delay: 30 });
+  await admin.type("main input[name=q]", "hello admin", { delay: 30 });
   await sleep(1000);
   const results = await admin.$$eval("#results .font-medium", (e) => e.map((x) => x.textContent));
   check("live search finds the note", results.includes("E2E note (draft)"), JSON.stringify(results));

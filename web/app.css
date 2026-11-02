@@ -38,6 +38,7 @@
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
   --color-danger: var(--danger);
+  --color-warn: var(--warn);
 }
 
 :root {
@@ -55,6 +56,7 @@
   --accent-soft: #eeeefc;
   --accent-ink: #ffffff;
   --danger: #d4423b;
+  --warn: #b45309;
 }
 
 .dark {
@@ -72,6 +74,7 @@
   --accent-soft: #2b2b47;
   --accent-ink: #15151f;
   --danger: #f0716a;
+  --warn: #f2b45c;
 }
 
 @layer base {
@@ -119,7 +122,8 @@
     @apply rounded-xl border border-line bg-raised;
   }
   .alert-error,
-  .alert-ok {
+  .alert-ok,
+  .alert-warn {
     @apply rounded-md px-3 py-2 text-[13px];
   }
   .alert-error {
@@ -127,6 +131,9 @@
   }
   .alert-ok {
     @apply bg-accent-soft text-accent;
+  }
+  .alert-warn {
+    @apply bg-warn/10 text-warn;
   }
   .kbd {
     @apply rounded border border-line bg-canvas px-1.5 font-sans text-[11px] text-faint;
@@ -267,6 +274,16 @@
   --tw-prose-hr: var(--line);
   --tw-prose-code: var(--ink);
   --tw-prose-pre-bg: #1f2328;
+  --tw-prose-pre-code: #e6edf3;
+  --tw-prose-captions: var(--muted);
+  --tw-prose-kbd: var(--ink);
+  --tw-prose-th-borders: var(--line);
+  --tw-prose-td-borders: var(--line);
+}
+
+.dark .prose pre {
+  background: #242628;
+  border: 1px solid var(--line);
 }
 
 .prose :where(code):not(:where(pre *)) {

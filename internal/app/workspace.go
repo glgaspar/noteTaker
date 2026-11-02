@@ -205,6 +205,7 @@ func (s *Server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any
 	return map[string]any{
 		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
 		"FolderID": orZero(formID(r, "folder")), "TagID": orZero(formID(r, "tag")), "Loc": userLoc(r),
+		"Page": "", // set by pages other than the note list, for the sidebar
 	}, true
 }
 

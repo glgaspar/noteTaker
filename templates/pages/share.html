@@ -1,51 +1,62 @@
 {{define "content"}}
-<a href="{{.Back}}" class="text-sm text-stone-500 hover:text-stone-900">← Back</a>
-<h1 class="mt-2 text-2xl font-semibold">{{.Title}}</h1>
-<p class="mb-6 text-stone-600">{{.Subject}}</p>
+<a href="{{.Back}}" class="btn-ghost -ml-3">{{icon "arrow-left"}} Back</a>
+<div class="mt-4 flex items-center gap-3">
+  <span class="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">{{if eq .Title "Share folder"}}{{icon "folder" "size-5"}}{{else}}{{icon "users" "size-5"}}{{end}}</span>
+  <div>
+    <h1 class="text-[20px] font-semibold">{{.Title}}</h1>
+    <p class="text-[13px] text-muted">{{.Subject}}</p>
+  </div>
+</div>
 
 {{if .CanManage}}
-<form method="post" action="{{.Action}}" class="mb-4 flex gap-2">
-  <input name="email" type="email" placeholder="email@example.com" required list="known-users" autocomplete="off"
-    class="w-72 rounded border border-stone-300 px-3 py-2">
-  <datalist id="known-users">{{range .Known}}<option value="{{.Email}}">{{.Name}}</option>{{end}}</datalist>
-  <select name="role" class="rounded border border-stone-300 px-2 py-2">
-    <option value="editor">Editor</option>
-    <option value="viewer">Viewer</option>
-  </select>
-  <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Share</button>
+<form method="post" action="{{.Action}}" class="card mt-6 flex flex-wrap items-end gap-2 p-4">
+  <label class="min-w-48 flex-1"><span class="label">Invite by email</span>
+    <input name="email" type="email" placeholder="name@example.com" required list="known-users" autocomplete="off" class="input">
+    <datalist id="known-users">{{range .Known}}<option value="{{.Email}}">{{.Name}}</option>{{end}}</datalist>
+  </label>
+  <label><span class="label">Role</span>
+    <select name="role" class="input w-32">
+      <option value="editor">Can edit</option>
+      <option value="viewer">Can view</option>
+    </select>
+  </label>
+  <button class="btn-primary h-9">{{icon "user-plus"}} Share</button>
+  <p class="w-full text-[12px] text-faint">Only people with an account can be added. Ask an admin to invite new people.</p>
 </form>
 {{end}}
-{{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
+{{with .Error}}<p class="alert-error mt-4">{{.}}</p>{{end}}
 
-<ul class="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white text-sm">
+<h2 class="section-label mb-2 mt-8 px-0">People with access</h2>
+<ul class="card divide-y divide-line">
   {{range .Members}}
-  <li class="flex items-center gap-3 px-4 py-2">
-    <div>
-      <div class="font-medium">{{.Name}}{{if eq .UserID $.User.ID}} (you){{end}}</div>
-      <div class="text-stone-500">{{.Email}}</div>
+  <li class="flex items-center gap-3 px-4 py-3">
+    <span class="grid size-8 shrink-0 place-items-center rounded-full text-[12px] font-semibold text-white" style="background: {{color .UserID}}">{{initials .Name}}</span>
+    <div class="min-w-0">
+      <div class="truncate font-medium">{{.Name}}{{if eq .UserID $.User.ID}} <span class="text-faint">(you)</span>{{end}}</div>
+      <div class="truncate text-[13px] text-muted">{{.Email}}</div>
     </div>
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       {{if or (eq .Role "owner") (not $.CanManage)}}
-      <span class="capitalize text-stone-600">{{.Role}}</span>
+      <span class="chip">{{if eq .Role "owner"}}Owner{{else if eq .Role "editor"}}Can edit{{else}}Can view{{end}}</span>
       {{else}}
       <form method="post" action="{{$.Action}}">
         <input type="hidden" name="email" value="{{.Email}}">
-        <select name="role" onchange="this.form.requestSubmit()" class="rounded border border-stone-200 px-2 py-1">
-          <option value="editor" {{if eq .Role "editor"}}selected{{end}}>Editor</option>
-          <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Viewer</option>
+        <select name="role" onchange="this.form.requestSubmit()" class="input h-8 w-28 text-[13px]">
+          <option value="editor" {{if eq .Role "editor"}}selected{{end}}>Can edit</option>
+          <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Can view</option>
         </select>
       </form>
       {{end}}
       {{if and (ne .Role "owner") (or $.CanManage (eq .UserID $.User.ID))}}
-      <form method="post" action="{{$.Action}}/{{.UserID}}/delete"
-        hx-confirm="{{if eq .UserID $.User.ID}}Leave?{{else}}Remove {{.Name}}?{{end}}">
-        <button class="rounded px-2 py-1 text-red-600 hover:bg-red-50">{{if eq .UserID $.User.ID}}Leave{{else}}Remove{{end}}</button>
+      <form method="post" action="{{$.Action}}/{{.UserID}}/delete" data-confirm-label="{{if eq .UserID $.User.ID}}Leave{{else}}Remove{{end}}"
+        hx-confirm="{{if eq .UserID $.User.ID}}You will lose access.{{else}}{{.Name}} will lose access.{{end}}">
+        <button class="btn-icon hover:text-danger" title="{{if eq .UserID $.User.ID}}Leave{{else}}Remove{{end}}">{{if eq .UserID $.User.ID}}{{icon "log-out"}}{{else}}{{icon "user-x"}}{{end}}</button>
       </form>
       {{end}}
     </div>
   </li>
   {{else}}
-  <li class="px-4 py-3 text-stone-400">Not shared with anyone yet.</li>
+  <li class="px-4 py-6 text-center text-[13px] text-faint">Not shared with anyone yet.</li>
   {{end}}
 </ul>
 {{end}}

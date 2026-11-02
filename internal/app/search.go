@@ -177,5 +177,6 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data["Authors"] = authors
 	data["Form"] = r.Form
+	data["Page"] = "search"
 	s.render(w, "search.html", data)
 }

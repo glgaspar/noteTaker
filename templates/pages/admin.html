@@ -1,52 +1,67 @@
 {{define "content"}}
-<h1 class="mb-6 text-2xl font-semibold">Users</h1>
+<div class="flex items-center gap-3">
+  <span class="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">{{icon "shield" "size-5"}}</span>
+  <div>
+    <h1 class="text-[20px] font-semibold">Users</h1>
+    <p class="text-[13px] text-muted">People join by invitation only.</p>
+  </div>
+</div>
 
-<form method="post" action="/admin/invites" class="mb-8 flex gap-2">
-  <input name="email" type="email" placeholder="email@example.com" required
-    class="w-72 rounded border border-stone-300 px-3 py-2">
-  <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Send invite</button>
+<form method="post" action="/admin/invites" class="card mt-6 flex flex-wrap items-end gap-2 p-4">
+  <label class="min-w-48 flex-1"><span class="label">Invite someone</span>
+    <input name="email" type="email" placeholder="name@example.com" required class="input">
+  </label>
+  <button class="btn-primary h-9">{{icon "mail"}} Send invite</button>
 </form>
-{{with .Msg.Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
-{{with .Msg.Notice}}<p class="mb-4 rounded bg-green-50 px-3 py-2 text-sm text-green-700">{{.}}</p>{{end}}
-{{with .Msg.Link}}<input readonly value="{{.}}" onclick="this.select()" class="mb-4 w-full rounded border border-stone-300 bg-white px-3 py-2 font-mono text-xs">{{end}}
+{{with .Msg.Error}}<p class="alert-error mt-4">{{.}}</p>{{end}}
+{{with .Msg.Notice}}<p class="alert-ok mt-4">{{.}}</p>{{end}}
+{{with .Msg.Link}}
+<div class="mt-2 flex gap-2">
+  <input readonly value="{{.}}" onclick="this.select()" class="input h-8 flex-1 font-mono text-[12px]">
+  <button type="button" class="btn-secondary" onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent = 'Copied'">{{icon "link"}} Copy</button>
+</div>
+{{end}}
 
-<table class="w-full overflow-hidden rounded-lg border border-stone-200 bg-white text-sm">
-  <thead class="bg-stone-100 text-left text-stone-600">
-    <tr><th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="px-4 py-2">Role</th><th class="px-4 py-2">Joined</th><th></th></tr>
-  </thead>
-  <tbody>
-    {{range .Users}}
-    <tr class="border-t border-stone-100 {{if .Disabled}}text-stone-400{{end}}">
-      <td class="px-4 py-2">{{.Name}}{{if .Disabled}} (disabled){{end}}</td>
-      <td class="px-4 py-2">{{.Email}}</td>
-      <td class="px-4 py-2">{{if .IsAdmin}}Admin{{else}}User{{end}}</td>
-      <td class="px-4 py-2">{{(local $.Loc .CreatedAt).Format "2006-01-02"}}</td>
-      <td class="space-x-3 whitespace-nowrap px-4 py-2 text-right">
-        {{if .Disabled}}
-        <form method="post" action="/admin/users/{{.ID}}/enable" class="inline">
-          <button class="text-stone-600 hover:text-stone-900">Enable</button>
-        </form>
-        {{else}}
-        <form method="post" action="/admin/users/{{.ID}}/reset" hx-confirm="Send {{.Name}} a password reset link?" class="inline">
-          <button class="text-stone-600 hover:text-stone-900">Reset password</button>
-        </form>
-        {{if ne .ID $.User.ID}}
-        <form method="post" action="/admin/users/{{.ID}}/disable" hx-confirm="Disable {{.Name}}? They are signed out everywhere." class="inline">
-          <button class="text-red-600 hover:text-red-800">Disable</button>
-        </form>
-        {{end}}
-        {{end}}
-      </td>
-    </tr>
-    {{end}}
-  </tbody>
-</table>
+<h2 class="section-label mb-2 mt-8 px-0">Members</h2>
+<ul class="card divide-y divide-line">
+  {{range .Users}}
+  <li class="flex flex-wrap items-center gap-3 px-4 py-3 {{if .Disabled}}opacity-60{{end}}">
+    <span class="grid size-8 shrink-0 place-items-center rounded-full text-[12px] font-semibold text-white" style="background: {{color .ID}}">{{initials .Name}}</span>
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-2">
+        <span class="truncate font-medium">{{.Name}}</span>
+        {{if .IsAdmin}}<span class="chip bg-accent-soft py-0 text-[11px] text-accent">Admin</span>{{end}}
+        {{if .Disabled}}<span class="chip py-0 text-[11px]">Disabled</span>{{end}}
+      </div>
+      <div class="truncate text-[13px] text-muted">{{.Email}} · joined {{(local $.Loc .CreatedAt).Format "Jan 2, 2006"}}</div>
+    </div>
+    <div class="flex items-center gap-1">
+      {{if .Disabled}}
+      <form method="post" action="/admin/users/{{.ID}}/enable"><button class="btn-secondary h-7">{{icon "user-check"}} Enable</button></form>
+      {{else}}
+      <form method="post" action="/admin/users/{{.ID}}/reset" hx-confirm="Send {{.Name}} a link to choose a new password?" data-confirm-label="Send link">
+        <button class="btn-ghost h-7">{{icon "key-round"}} Reset password</button>
+      </form>
+      {{if ne .ID $.User.ID}}
+      <form method="post" action="/admin/users/{{.ID}}/disable" hx-confirm="{{.Name}} will be signed out everywhere and can't log in until enabled again." data-confirm-label="Disable">
+        <button class="btn-ghost h-7 hover:text-danger">{{icon "user-x"}} Disable</button>
+      </form>
+      {{end}}
+      {{end}}
+    </div>
+  </li>
+  {{end}}
+</ul>
 
 {{if .Invites}}
-<h2 class="mb-3 mt-8 text-lg font-semibold">Pending invites</h2>
-<ul class="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white text-sm">
+<h2 class="section-label mb-2 mt-8 px-0">Pending invites</h2>
+<ul class="card divide-y divide-line">
   {{range .Invites}}
-  <li class="flex px-4 py-2"><span>{{.Email}}</span><span class="ml-auto text-stone-500">expires {{(local $.Loc .ExpiresAt).Format "2006-01-02"}}</span></li>
+  <li class="flex items-center gap-3 px-4 py-3">
+    <span class="grid size-8 place-items-center rounded-full bg-hover text-faint">{{icon "mail"}}</span>
+    <span class="min-w-0 flex-1 truncate">{{.Email}}</span>
+    <span class="text-[12px] text-faint">expires {{(local $.Loc .ExpiresAt).Format "Jan 2"}}</span>
+  </li>
   {{end}}
 </ul>
 {{end}}

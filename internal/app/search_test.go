@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-var resultTitle = regexp.MustCompile(`class="font-medium">([^<]*)</div>`)
+var resultTitle = regexp.MustCompile(`class="truncate font-medium[^"]*">([^<]*)</span>`)
 
 func (u *user) search(ws int64, query string) []string {
 	u.t.Helper()

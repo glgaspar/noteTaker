@@ -125,6 +125,7 @@ func (s *Server) importPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data["Storage"] = s.files != nil
+	data["Page"] = "import"
 	s.render(w, "import.html", data)
 }
 
@@ -271,6 +272,7 @@ func (s *Server) importJobPage(w http.ResponseWriter, r *http.Request) {
 	var st importStats
 	json.Unmarshal(stats, &st)
 	data["Storage"] = s.files != nil
+	data["Page"] = "import"
 	data["Stats"] = &st
 	data["Running"] = running
 	data["JobURL"] = r.URL.Path
