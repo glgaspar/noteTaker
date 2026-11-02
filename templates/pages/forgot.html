@@ -1,17 +1,19 @@
-{{define "content"}}
-<div class="mx-auto mt-16 max-w-sm rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-  <h1 class="mb-2 text-xl font-semibold">Reset your password</h1>
-  {{if .Sent}}
-  <p class="text-sm text-stone-600">If an account exists for that email, we sent it a link to choose a new password.</p>
-  {{else}}
-  <p class="mb-6 text-sm text-stone-600">We'll email you a link to choose a new password.</p>
-  {{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
-  <form method="post" action="/forgot" class="space-y-4">
-    <input name="email" type="email" required autofocus placeholder="you@example.com"
-      class="w-full rounded border border-stone-300 px-3 py-2">
-    <button class="w-full rounded bg-stone-900 px-3 py-2 text-white hover:bg-stone-700">Send link</button>
-  </form>
-  {{end}}
-  <a href="/login" class="mt-4 block text-center text-sm text-stone-500 hover:text-stone-900">Back to log in</a>
-</div>
+{{define "content"}}{{template "authcard" .}}{{end}}
+{{define "auth"}}
+<h1 class="text-[18px] font-semibold">Reset your password</h1>
+{{if .Sent}}
+<p class="mt-2 text-[13px] text-muted">If an account exists for that email, we sent it a link to choose a new password.</p>
+{{else}}
+<p class="mb-6 mt-1 text-[13px] text-muted">We'll email you a link to choose a new password.</p>
+{{with .Error}}<p class="alert-error mb-4">{{.}}</p>{{end}}
+<form method="post" action="/forgot" class="space-y-4">
+  <label class="block"><span class="label">Email</span>
+    <input name="email" type="email" required autofocus class="input">
+  </label>
+  <button class="btn-primary h-9 w-full justify-center">Send link</button>
+</form>
+{{end}}
+{{end}}
+{{define "authfooter"}}
+<p class="mt-4 text-center text-[13px]"><a href="/login" class="text-muted hover:text-ink">Back to log in</a></p>
 {{end}}

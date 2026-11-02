@@ -113,7 +113,9 @@ func newServer(db *pgxpool.Pool, files *storage, baseURL string) (*server, error
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
 	}
-	s.tmpl = parseTemplates(template.FuncMap{"asset": s.assetURL, "local": local})
+	s.tmpl = parseTemplates(template.FuncMap{
+		"asset": s.assetURL, "local": local, "icon": s.icon, "initials": initials, "color": avatarColor, "ago": ago,
+	})
 	return s, nil
 }
 

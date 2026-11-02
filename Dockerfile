@@ -2,6 +2,7 @@ FROM node:24-alpine AS assets
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
+COPY scripts scripts
 COPY web web
 COPY templates templates
 RUN npm run build

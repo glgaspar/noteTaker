@@ -4,27 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NoteTaker</title>
+  <script>
+    try {
+      const t = localStorage.getItem("theme");
+      if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("dark");
+    } catch (e) {}
+  </script>
   <link rel="icon" href="{{asset "/static/favicon.svg"}}">
   <link rel="stylesheet" href="{{asset "/static/dist/app.css"}}">
   <script src="{{asset "/static/dist/app.js"}}" defer></script>
 </head>
-<body class="flex h-screen flex-col bg-stone-50 text-stone-900" hx-boost="true">
-  {{with .User}}
-  <header class="shrink-0 border-b border-stone-200 bg-white">
-    <nav class="flex items-center gap-6 px-4 py-3">
-      <a href="/" class="font-semibold">NoteTaker</a>
-      {{if .IsAdmin}}<a href="/admin/users" class="text-sm text-stone-600 hover:text-stone-900">Users</a>{{end}}
-      <span class="ml-auto text-sm text-stone-500">{{.Name}}</span>
-      <form method="post" action="/logout">
-        <button class="text-sm text-stone-600 hover:text-stone-900">Log out</button>
-      </form>
-    </nav>
-  </header>
-  {{end}}
+<body class="h-dvh overflow-hidden" hx-boost="true" data-icons="{{asset "/static/dist/icons.svg"}}">
   {{block "main" .}}
-  <div class="flex-1 overflow-auto">
-    <main class="mx-auto max-w-5xl px-4 py-8">{{template "content" .}}</main>
+  <div class="flex h-dvh flex-col">
+    {{if .User}}{{template "topbar" .}}{{end}}
+    <main class="flex-1 overflow-auto">
+      <div class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">{{template "content" .}}</div>
+    </main>
   </div>
   {{end}}
+  {{template "dialogs" .}}
 </body>
 </html>{{end}}

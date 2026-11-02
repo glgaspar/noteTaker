@@ -2,6 +2,184 @@
 @import "highlight.js/styles/github-dark.css";
 @plugin "@tailwindcss/typography";
 @source "../templates";
+@source "../web";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face {
+  font-family: "Inter";
+  src: url("/static/dist/fonts/inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2190-2199, U+2212, U+2215;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/static/dist/fonts/inter-latin-ext.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Semantic colors; .dark swaps them. Use bg-canvas, text-ink, border-line, etc. */
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-danger: var(--danger);
+}
+
+:root {
+  color-scheme: light;
+  --canvas: #ffffff;
+  --panel: #f8f7f4;
+  --raised: #ffffff;
+  --line: #ebe9e4;
+  --ink: #2b2925;
+  --muted: #73706a;
+  --faint: #a8a49c;
+  --hover: rgb(55 53 47 / 0.06);
+  --selected: rgb(55 53 47 / 0.09);
+  --accent: #5b5bd6;
+  --accent-soft: #eeeefc;
+  --accent-ink: #ffffff;
+  --danger: #d4423b;
+}
+
+.dark {
+  color-scheme: dark;
+  --canvas: #1a1a1a;
+  --panel: #212121;
+  --raised: #282828;
+  --line: #323232;
+  --ink: #e8e5df;
+  --muted: #a5a199;
+  --faint: #6f6b65;
+  --hover: rgb(255 255 255 / 0.06);
+  --selected: rgb(255 255 255 / 0.09);
+  --accent: #8e8ef5;
+  --accent-soft: #2b2b47;
+  --accent-ink: #15151f;
+  --danger: #f0716a;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas font-sans text-[14px] text-ink antialiased;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+}
+
+@layer components {
+  .icon {
+    @apply inline-block size-4 shrink-0;
+  }
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-[13px] font-medium whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-ink hover:brightness-110;
+  }
+  .btn-secondary {
+    @apply border border-line bg-raised text-ink hover:bg-hover;
+  }
+  .btn-ghost {
+    @apply text-muted hover:bg-hover hover:text-ink;
+  }
+  .btn-danger {
+    @apply bg-danger text-white hover:brightness-110;
+  }
+  .btn-icon {
+    @apply inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-ink;
+  }
+  .input {
+    @apply h-9 w-full rounded-md border border-line bg-raised px-3 text-[14px] text-ink outline-none placeholder:text-faint focus:border-accent focus:ring-3 focus:ring-accent/15;
+  }
+  .label {
+    @apply mb-1.5 block text-[13px] font-medium text-muted;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-raised;
+  }
+  .alert-error,
+  .alert-ok {
+    @apply rounded-md px-3 py-2 text-[13px];
+  }
+  .alert-error {
+    @apply bg-danger/10 text-danger;
+  }
+  .alert-ok {
+    @apply bg-accent-soft text-accent;
+  }
+  .kbd {
+    @apply rounded border border-line bg-canvas px-1.5 font-sans text-[11px] text-faint;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full bg-hover px-2 py-0.5 text-[12px] text-muted;
+  }
+  .section-label {
+    @apply px-2 text-[11px] font-semibold tracking-wide text-faint uppercase;
+  }
+  /* sidebar and list rows */
+  .nav-item {
+    @apply flex h-8 items-center gap-2 rounded-md px-2 text-[13.5px] text-muted transition-colors hover:bg-hover hover:text-ink;
+  }
+  .nav-item[aria-current="page"],
+  .nav-item.is-current {
+    @apply bg-selected font-medium text-ink;
+  }
+  /* popover menus (see menus.js) */
+  .menu {
+    @apply m-0 min-w-52 rounded-lg border border-line bg-raised p-1 text-[13.5px] text-ink shadow-lg shadow-black/10;
+    position: fixed;
+    inset: auto;
+  }
+  .menu-item,
+  .menu-item-danger {
+    @apply flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-ink hover:bg-hover;
+  }
+  .menu-item .icon {
+    @apply text-muted;
+  }
+  .menu-item-danger {
+    @apply text-danger;
+  }
+  .menu-item-danger .icon {
+    @apply text-danger;
+  }
+  .menu-sep {
+    @apply my-1 h-px bg-line;
+  }
+  .menu-label {
+    @apply px-2 pt-1.5 pb-1 text-[11px] font-semibold tracking-wide text-faint uppercase;
+  }
+  /* modal dialogs (see dialogs.js) */
+  .dialog {
+    @apply m-auto w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-line bg-raised p-0 text-ink shadow-2xl;
+  }
+  .dialog::backdrop {
+    @apply bg-black/30 backdrop-blur-[1px];
+  }
+}
+
+/* ---- editor ---- */
 
 .tiptap {
   outline: none;
@@ -13,7 +191,7 @@
   float: left;
   height: 0;
   pointer-events: none;
-  color: var(--color-stone-300);
+  color: var(--faint);
 }
 
 .tiptap ul[data-type="taskList"] {
@@ -28,21 +206,29 @@
   margin: 0.25rem 0;
 }
 
-.tiptap ul[data-type="taskList"] li > div > p {
-  margin: 0;
-}
-
 .tiptap ul[data-type="taskList"] li > label {
   user-select: none;
+}
+
+.tiptap ul[data-type="taskList"] li > label input {
+  accent-color: var(--accent);
 }
 
 .tiptap ul[data-type="taskList"] li > div {
   flex: 1;
 }
 
+.tiptap ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}
+
 .tiptap ul[data-type="taskList"] li[data-checked="true"] > div {
-  color: var(--color-stone-400);
+  color: var(--faint);
   text-decoration: line-through;
+}
+
+.tiptap img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
 }
 
 .collaboration-carets__caret {
@@ -66,4 +252,28 @@
   line-height: normal;
   white-space: nowrap;
   user-select: none;
+}
+
+/* Typography plugin colors follow the theme tokens. */
+.prose {
+  --tw-prose-body: var(--ink);
+  --tw-prose-headings: var(--ink);
+  --tw-prose-bold: var(--ink);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bullets: var(--faint);
+  --tw-prose-counters: var(--muted);
+  --tw-prose-quotes: var(--muted);
+  --tw-prose-quote-borders: var(--line);
+  --tw-prose-hr: var(--line);
+  --tw-prose-code: var(--ink);
+  --tw-prose-pre-bg: #1f2328;
+}
+
+.prose :where(code):not(:where(pre *)) {
+  @apply rounded bg-hover px-1 py-0.5 font-normal;
+}
+
+.prose :where(code):not(:where(pre *))::before,
+.prose :where(code):not(:where(pre *))::after {
+  content: none;
 }

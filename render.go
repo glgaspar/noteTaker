@@ -4,13 +4,16 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
 	"path"
+	"strings"
 	"time"
+	"unicode"
 	_ "time/tzdata" // zone names work even in minimal containers
 )
 
@@ -50,6 +53,58 @@ func local(loc *time.Location, t time.Time) time.Time {
 		loc = time.Local
 	}
 	return t.In(loc)
+}
+
+// icon renders a Lucide icon from the sprite built by scripts/assets.mjs.
+func (s *server) icon(name string, class ...string) template.HTML {
+	return template.HTML(fmt.Sprintf(`<svg class="icon %s" aria-hidden="true"><use href="%s#%s"/></svg>`,
+		template.HTMLEscapeString(strings.Join(class, " ")), s.assetURL("/static/dist/icons.svg"), template.HTMLEscapeString(name)))
+}
+
+// initials are the avatar letters for a name: "Ann Lee" -> "AL".
+func initials(name string) string {
+	var out []rune
+	for _, word := range strings.Fields(name) {
+		if r := []rune(word); unicode.IsLetter(r[0]) || unicode.IsDigit(r[0]) {
+			out = append(out, unicode.ToUpper(r[0]))
+		}
+	}
+	if len(out) == 0 {
+		return "?"
+	}
+	return string(out[:min(len(out), 2)])
+}
+
+// avatarColors match the cursor colors in editor.js.
+var avatarColors = []string{"#e11d48", "#2563eb", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#db2777", "#65a30d"}
+
+func avatarColor(id int64) template.CSS {
+	return template.CSS(avatarColors[id%int64(len(avatarColors))])
+}
+
+// ago formats a time relative to now, in the viewer's zone: "now", "5m", "3h", "Yesterday",
+// "Mon", "Jan 2", "Jan 2, 2024".
+func ago(loc *time.Location, t time.Time) string {
+	t = local(loc, t)
+	now := time.Now().In(t.Location())
+	d := now.Sub(t)
+	day := func(x time.Time) time.Time { y, m, dd := x.Date(); return time.Date(y, m, dd, 0, 0, 0, 0, x.Location()) }
+	days := int(day(now).Sub(day(t)).Hours() / 24)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case days == 0:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case days == 1:
+		return "Yesterday"
+	case days < 7:
+		return t.Format("Mon")
+	case t.Year() == now.Year():
+		return t.Format("Jan 2")
+	}
+	return t.Format("Jan 2, 2006")
 }
 
 func (s *server) render(w http.ResponseWriter, name string, data any) {

@@ -1,5 +1,6 @@
 import htmx from "htmx.org";
 import { mountEditor } from "./editor.js";
+import { initUI } from "./ui.js";
 
 window.htmx = htmx;
 
@@ -15,6 +16,7 @@ htmx.config.refreshOnHistoryMiss = true;
 let editor = null;
 
 htmx.onLoad((root) => {
+  initUI();
   const el = root.querySelector?.("#editor") || (root.id === "editor" ? root : null);
   if (el) editor = mountEditor(el);
 });
