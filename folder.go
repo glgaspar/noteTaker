@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type folder struct {
@@ -98,4 +100,108 @@ func (s *server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/w/%d", ws.ID))
+}
+
+// moveFolderPage lists where a folder can go: folders the user can edit, except the folder
+// itself and its subfolders.
+func (s *server) moveFolderPage(w http.ResponseWriter, r *http.Request) {
+	ws, ok := s.editable(w, r, folderParentRole)
+	if !ok {
+		return
+	}
+	user := currentUser(r)
+	found, err := s.userWorkspaces(r.Context(), user.ID, ws.ID)
+	if err != nil || len(found) == 0 {
+		serverError(w, fmt.Errorf("workspace %d: %v", ws.ID, err))
+		return
+	}
+	folders, err := s.folderTree(r.Context(), found[0], user.ID)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	id := pathID(r, "id")
+	var current folder
+	var targets []folder
+	skipDepth := -1 // while >= 0, we are inside the moved folder's subtree
+	for _, f := range folders {
+		if skipDepth >= 0 && f.Depth > skipDepth {
+			continue
+		}
+		skipDepth = -1
+		if f.ID == id {
+			current, skipDepth = f, f.Depth
+			continue
+		}
+		if f.CanEdit() {
+			targets = append(targets, f)
+		}
+	}
+	s.render(w, "move.html", map[string]any{
+		"User": user, "Folder": current, "ParentID": orZero(current.ParentID), "Targets": targets, "CanRoot": found[0].CanEdit(),
+		"Back": fmt.Sprintf("/w/%d?folder=%d", ws.ID, id),
+	})
+}
+
+func (s *server) moveFolder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ws, ok := s.editable(w, r, folderParentRole)
+	if !ok {
+		return
+	}
+	id := pathID(r, "id")
+	parentID := formID(r, "parent_id")
+	target, ok := s.container(w, r, ws.ID, parentID)
+	if !ok {
+		return
+	}
+	if target.ID != ws.ID {
+		http.Error(w, "folder is in another workspace", http.StatusBadRequest)
+		return
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	// Serialize moves within the workspace so two concurrent moves cannot form a cycle.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, ws.ID); err != nil {
+		serverError(w, err)
+		return
+	}
+	const subtree = `WITH RECURSIVE sub AS (
+		SELECT id FROM folders WHERE id = $1
+		UNION ALL
+		SELECT c.id FROM folders c JOIN sub ON c.parent_id = sub.id
+	)`
+	var cycle bool
+	if err := tx.QueryRow(ctx, subtree+` SELECT EXISTS (SELECT 1 FROM sub WHERE id = $2)`, id, parentID).Scan(&cycle); err != nil {
+		serverError(w, err)
+		return
+	}
+	if cycle {
+		http.Error(w, "a folder cannot be moved into itself", http.StatusBadRequest)
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE folders SET parent_id = $1 WHERE id = $2`, parentID, id); err != nil {
+		serverError(w, err)
+		return
+	}
+	rows, err := tx.Query(ctx, subtree+` SELECT n.id FROM notes n JOIN sub ON n.folder_id = sub.id`, id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	notes, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, err)
+		return
+	}
+	s.hub.kickNotes(notes) // shares inherited from the old or new parents changed
+	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
 }

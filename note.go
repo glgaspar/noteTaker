@@ -146,6 +146,7 @@ func (s *server) moveNote(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	s.hub.kickNotes([]int64{id}) // who may access it can change with the folder
 	redirect(w, r, workspaceURL(ws.ID, orZero(folderID), id))
 }
 

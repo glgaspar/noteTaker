@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"log"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/coder/websocket"
@@ -53,16 +54,28 @@ func (h *hub) room(noteID int64) *room {
 // kick disconnects all of a user's sockets, e.g. after their access changed.
 // They reconnect with their new role, or are refused.
 func (h *hub) kick(userID int64) {
+	h.disconnect(func(*room) bool { return true }, func(c *client) bool { return c.userID == userID })
+}
+
+// kickNotes disconnects everyone editing the given notes, e.g. after a move changed who may
+// access them.
+func (h *hub) kickNotes(noteIDs []int64) {
+	h.disconnect(func(rm *room) bool { return slices.Contains(noteIDs, rm.noteID) }, func(*client) bool { return true })
+}
+
+func (h *hub) disconnect(inRoom func(*room) bool, match func(*client) bool) {
 	h.mu.Lock()
-	rooms := make([]*room, 0, len(h.rooms))
+	var rooms []*room
 	for _, rm := range h.rooms {
-		rooms = append(rooms, rm)
+		if inRoom(rm) {
+			rooms = append(rooms, rm)
+		}
 	}
 	h.mu.Unlock()
 	for _, rm := range rooms {
 		rm.mu.Lock()
 		for c := range rm.clients {
-			if c.userID == userID {
+			if match(c) {
 				rm.drop(c)
 			}
 		}

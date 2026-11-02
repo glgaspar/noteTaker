@@ -115,6 +115,8 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /w/{id}/folders", auth(s.createFolder))
 	mux.Handle("POST /folders/{id}/rename", auth(s.renameFolder))
 	mux.Handle("POST /folders/{id}/delete", auth(s.deleteFolder))
+	mux.Handle("GET /folders/{id}/move", auth(s.moveFolderPage))
+	mux.Handle("POST /folders/{id}/move", auth(s.moveFolder))
 	mux.Handle("GET /folders/{id}/share", auth(s.folderShares))
 	mux.Handle("POST /folders/{id}/share", auth(s.addFolderShare))
 	mux.Handle("POST /folders/{id}/share/{user}/delete", auth(s.removeFolderShare))
