@@ -8,20 +8,28 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"golang.org/x/net/html"
@@ -54,6 +62,8 @@ type importStats struct {
 	Missing int      // attachments skipped (no storage, or upload failed)
 	Skipped []string // input files with an unsupported type
 	Errors  []string
+
+	onNote func() // called after each stored note, to report progress
 }
 
 // parseHTML returns the <body> of an HTML document and its <title>.
@@ -449,6 +459,9 @@ func (s *server) storeImported(ctx context.Context, wsID int64, folderID *int64,
 		}
 	}
 	st.Notes++
+	if st.onNote != nil {
+		st.onNote()
+	}
 	return nil
 }
 
@@ -461,6 +474,11 @@ func (s *server) importPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "import.html", data)
 }
 
+// importDir holds uploads while their import job runs.
+var importDir = filepath.Join(os.TempDir(), "notetaker-imports")
+
+// importNotes saves the uploaded files and imports them in the background; the browser is
+// sent to a page that shows the job's progress.
 func (s *server) importNotes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
@@ -475,28 +493,133 @@ func (s *server) importNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := currentUser(r)
-	var st importStats
-	for _, fh := range r.MultipartForm.File["files"] {
-		f, err := fh.Open()
+	var jobID int64
+	if err := s.db.QueryRow(ctx, `INSERT INTO import_jobs (workspace_id, user_id) VALUES ($1, $2) RETURNING id`,
+		ws.ID, user.ID).Scan(&jobID); err != nil {
+		serverError(w, err)
+		return
+	}
+	dir := filepath.Join(importDir, strconv.FormatInt(jobID, 10))
+	var names []string
+	err := os.MkdirAll(dir, 0o700)
+	for i, fh := range r.MultipartForm.File["files"] {
 		if err != nil {
-			serverError(w, err)
-			return
+			break
 		}
-		err = s.importFile(ctx, ws.ID, folderID, user.ID, fh.Filename, f, fh.Size, &st)
-		f.Close()
-		if err == errUnsupported {
-			st.Skipped = append(st.Skipped, fh.Filename)
-		} else if err != nil {
-			log.Printf("import %s: %v", fh.Filename, err)
-			st.Errors = append(st.Errors, fh.Filename+": "+err.Error())
+		name := filepath.Base(fh.Filename)
+		names = append(names, name)
+		err = saveUpload(fh, filepath.Join(dir, fmt.Sprintf("%d-%s", i, name)))
+	}
+	if err != nil {
+		os.RemoveAll(dir)
+		s.db.Exec(ctx, `DELETE FROM import_jobs WHERE id = $1`, jobID)
+		serverError(w, err)
+		return
+	}
+	go s.runImport(jobID, ws.ID, folderID, user.ID, dir, names)
+	redirect(w, r, fmt.Sprintf("/w/%d/imports/%d", ws.ID, jobID))
+}
+
+func saveUpload(fh *multipart.FileHeader, dst string) error {
+	src, err := fh.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// runImport imports the files saved for a job, recording progress in import_jobs.
+func (s *server) runImport(jobID, wsID int64, folderID *int64, userID int64, dir string, names []string) {
+	ctx := context.Background()
+	defer os.RemoveAll(dir)
+	var st importStats
+	save := func(running bool) {
+		stats, _ := json.Marshal(&st)
+		if _, err := s.db.Exec(ctx, `UPDATE import_jobs SET stats = $1, running = $2 WHERE id = $3`, stats, running, jobID); err != nil {
+			log.Printf("import job %d: %v", jobID, err)
 		}
 	}
+	last := time.Now()
+	st.onNote = func() {
+		if time.Since(last) > time.Second {
+			save(true)
+			last = time.Now()
+		}
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("import job %d panicked: %v", jobID, p)
+			st.Errors = append(st.Errors, "the import stopped because of an internal error")
+		}
+		save(false)
+	}()
+	for i, name := range names {
+		err := s.importSaved(ctx, wsID, folderID, userID, filepath.Join(dir, fmt.Sprintf("%d-%s", i, name)), name, &st)
+		if err == errUnsupported {
+			st.Skipped = append(st.Skipped, name)
+		} else if err != nil {
+			log.Printf("import %s: %v", name, err)
+			st.Errors = append(st.Errors, name+": "+err.Error())
+		}
+	}
+}
+
+func (s *server) importSaved(ctx context.Context, wsID int64, folderID *int64, userID int64, file, name string, st *importStats) error {
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	return s.importFile(ctx, wsID, folderID, userID, name, f, info.Size(), st)
+}
+
+// recoverImports marks jobs cut short by a restart and removes their files.
+func recoverImports(ctx context.Context, db *pgxpool.Pool) {
+	os.RemoveAll(importDir)
+	if _, err := db.Exec(ctx, `
+		UPDATE import_jobs SET running = false,
+			stats = jsonb_set(stats, '{Errors}', coalesce(stats->'Errors', '[]') || '["interrupted by a server restart"]')
+		WHERE running`); err != nil {
+		log.Printf("recover imports: %v", err)
+	}
+}
+
+func (s *server) importJobPage(w http.ResponseWriter, r *http.Request) {
 	data, ok := s.sidebar(w, r)
 	if !ok {
 		return
 	}
+	var running bool
+	var stats []byte
+	err := s.db.QueryRow(r.Context(), `SELECT running, stats FROM import_jobs WHERE id = $1 AND workspace_id = $2 AND user_id = $3`,
+		pathID(r, "job"), pathID(r, "id"), currentUser(r).ID).Scan(&running, &stats)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	var st importStats
+	json.Unmarshal(stats, &st)
 	data["Storage"] = s.files != nil
 	data["Stats"] = &st
+	data["Running"] = running
+	data["JobURL"] = r.URL.Path
 	s.render(w, "import.html", data)
 }
 

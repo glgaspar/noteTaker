@@ -10,8 +10,13 @@
       </p>
 
       {{with .Stats}}
-      <div class="mb-6 rounded border border-stone-200 bg-stone-50 p-4 text-sm">
+      <div id="import-status" class="mb-6 rounded border border-stone-200 bg-stone-50 p-4 text-sm"
+        {{if $.Running}}hx-get="{{$.JobURL}}" hx-trigger="every 1s" hx-select="#import-status" hx-swap="outerHTML"{{end}}>
+        {{if $.Running}}
+        <p class="font-medium">Importing… {{.Notes}} note{{if ne .Notes 1}}s{{end}} so far. You can leave this page; the import continues.</p>
+        {{else}}
         <p class="font-medium">Imported {{.Notes}} note{{if ne .Notes 1}}s{{end}}{{if .Files}} and {{.Files}} attachment{{if ne .Files 1}}s{{end}}{{end}}.</p>
+        {{end}}
         {{if .Missing}}<p class="mt-1 text-amber-700">{{.Missing}} attachment{{if ne .Missing 1}}s were{{else}} was{{end}} skipped{{if not $.Storage}} because file storage is not configured{{end}}.</p>{{end}}
         {{with .Skipped}}<p class="mt-1 text-amber-700">Unsupported files: {{range $i, $f := .}}{{if $i}}, {{end}}{{$f}}{{end}}</p>{{end}}
         {{range .Errors}}<p class="mt-1 text-red-700">{{.}}</p>{{end}}

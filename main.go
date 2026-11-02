@@ -80,6 +80,7 @@ func serve(db *pgxpool.Pool) error {
 	} else {
 		go sweepFilesEvery(db, files, 6*time.Hour)
 	}
+	recoverImports(context.Background(), db)
 	assets, err := loadAssets()
 	if err != nil {
 		return err
@@ -125,6 +126,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("GET /w/{id}/search", auth(s.searchPage))
 	mux.Handle("GET /w/{id}/import", auth(s.importPage))
 	mux.Handle("POST /w/{id}/import", auth(s.importNotes))
+	mux.Handle("GET /w/{id}/imports/{job}", auth(s.importJobPage))
 	mux.Handle("GET /files/{id}", auth(s.serveFile))
 	mux.Handle("POST /notes/{id}/attachments", auth(s.uploadFile))
 	mux.Handle("GET /w/{id}/members", auth(s.workspaceMembers))
