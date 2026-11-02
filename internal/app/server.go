@@ -125,5 +125,28 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/users/{id}/reset", s.requireAdmin(http.HandlerFunc(s.adminReset)))
 	mux.Handle("POST /admin/users/{id}/disable", s.requireAdmin(s.setDisabled(true)))
 	mux.Handle("POST /admin/users/{id}/enable", s.requireAdmin(s.setDisabled(false)))
-	return http.NewCrossOriginProtection().Handler(mux)
+	return s.securityHeaders(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// contentPolicy allows scripts only from our own files (no inline scripts or eval). Styles
+// may be inline (the editor sets some), and notes may show images from other sites.
+const contentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob: https: http:; connect-src 'self'; object-src 'none'; " +
+	"frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+
+// securityHeaders sets browser protections on every response. Handlers may override them,
+// as file downloads do with a stricter policy.
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if s.secure {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

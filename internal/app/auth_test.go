@@ -154,3 +154,21 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("still blocked after clear")
 	}
 }
+
+func TestSecurityHeaders(t *testing.T) {
+	a := newApp(t, false)
+	res := a.client().get("/login")
+	for header, want := range map[string]string{
+		"Content-Security-Policy": "script-src 'self';",
+		"X-Frame-Options":         "DENY",
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "same-origin",
+	} {
+		if got := res.header.Get(header); !strings.Contains(got, want) {
+			t.Errorf("%s = %q, want it to contain %q", header, got, want)
+		}
+	}
+	if strings.Contains(res.body, "onclick=") || strings.Contains(res.body, "<script>") {
+		t.Error("page has inline script, which the CSP blocks")
+	}
+}

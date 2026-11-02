@@ -33,8 +33,7 @@
           <span class="font-medium">Choose files or drop them here</span>
           <span data-files class="mt-1 text-[13px] text-muted">.enex, .md, .html, .txt or .zip</span>
           <input name="files" type="file" multiple required accept=".enex,.md,.markdown,.html,.htm,.txt,.zip"
-            class="absolute inset-0 cursor-pointer opacity-0"
-            onchange="this.parentElement.querySelector('[data-files]').textContent = [...this.files].map((f) => f.name).join(', ') || '.enex, .md, .html, .txt or .zip'">
+            class="absolute inset-0 cursor-pointer opacity-0" data-file-names>
         </label>
         <label class="block"><span class="label">Import into</span>
           <select name="folder_id" class="input">

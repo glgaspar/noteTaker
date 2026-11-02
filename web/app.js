@@ -5,6 +5,7 @@ import { initTree } from "./tree.js";
 import { labelShortcuts } from "./palette.js";
 
 window.htmx = htmx;
+htmx.config.allowEval = false; // we use no hx-on or js: expressions, and the CSP forbids eval
 
 // Tell the server our time zone, for timestamps and date filters.
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;

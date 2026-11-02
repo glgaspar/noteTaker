@@ -17,8 +17,8 @@
 {{with .Msg.Notice}}<p class="alert-ok mt-4">{{.}}</p>{{end}}
 {{with .Msg.Link}}
 <div class="mt-2 flex gap-2">
-  <input readonly value="{{.}}" onclick="this.select()" class="input h-8 flex-1 font-mono text-[12px]">
-  <button type="button" class="btn-secondary" onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent = 'Copied'">{{icon "link"}} Copy</button>
+  <input readonly value="{{.}}" data-action="select" class="input h-8 flex-1 font-mono text-[12px]">
+  <button type="button" class="btn-secondary" data-action="copy-field">{{icon "link"}} Copy</button>
 </div>
 {{end}}
 

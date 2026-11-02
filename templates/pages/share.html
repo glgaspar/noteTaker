@@ -41,7 +41,7 @@
       {{else}}
       <form method="post" action="{{$.Action}}">
         <input type="hidden" name="email" value="{{.Email}}">
-        <select name="role" onchange="this.form.requestSubmit()" class="input h-8 w-28 text-[13px]">
+        <select name="role" data-autosubmit class="input h-8 w-28 text-[13px]">
           <option value="editor" {{if eq .Role "editor"}}selected{{end}}>Can edit</option>
           <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Can view</option>
         </select>

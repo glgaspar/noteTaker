@@ -70,13 +70,13 @@
       </div>
       <div id="note-menu" popover data-align="end" class="menu">
         {{if .CanEdit}}
-        <button class="menu-item" onclick="document.getElementById('move-dialog').showModal(); this.closest('[popover]').hidePopover()">{{icon "folder-input"}} Move to…</button>
+        <button class="menu-item" data-action="open-dialog" data-dialog="move-dialog">{{icon "folder-input"}} Move to…</button>
         {{end}}
-        <button class="menu-item" onclick="navigator.clipboard.writeText(location.href); this.closest('[popover]').hidePopover()">{{icon "link"}} Copy link</button>
+        <button class="menu-item" data-action="copy-link">{{icon "link"}} Copy link</button>
         <div class="menu-sep"></div>
         <a href="/notes/{{.ID}}/export?format=md" hx-boost="false" class="menu-item">{{icon "file-text"}} Export as Markdown</a>
         <a href="/notes/{{.ID}}/export?format=html" hx-boost="false" class="menu-item">{{icon "code"}} Export as HTML</a>
-        <button class="menu-item" onclick="this.closest('[popover]').hidePopover(); print()">{{icon "inbox"}} Print or save as PDF</button>
+        <button class="menu-item" data-action="print">{{icon "inbox"}} Print or save as PDF</button>
         {{if .CanEdit}}
         <div class="menu-sep"></div>
         <form method="post" action="/notes/{{.ID}}/delete" hx-confirm="“{{or .Title "Untitled"}}” will be deleted for everyone.">

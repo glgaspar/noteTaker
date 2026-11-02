@@ -180,6 +180,46 @@ document.addEventListener("htmx:confirm", (e) => {
   confirmDialog(e.detail.question, e.detail.elt.dataset.confirmLabel).then((ok) => ok && e.detail.issueRequest(true));
 });
 
+// ---- small actions; markup has no inline handlers (the CSP forbids them) ----
+
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  switch (el.dataset.action) {
+    case "back":
+      history.back();
+      break;
+    case "print":
+      closeMenus();
+      print();
+      break;
+    case "copy-link":
+      navigator.clipboard.writeText(location.href);
+      closeMenus();
+      break;
+    case "copy-field": // copies the input just before the button
+      navigator.clipboard.writeText(el.previousElementSibling.value);
+      el.textContent = "Copied";
+      break;
+    case "select":
+      el.select();
+      break;
+    case "open-dialog":
+      closeMenus();
+      document.getElementById(el.dataset.dialog)?.showModal();
+      break;
+  }
+});
+
+document.addEventListener("change", (e) => {
+  if (e.target.matches("[data-autosubmit]")) e.target.form.requestSubmit();
+  if (e.target.matches("[data-file-names]")) {
+    const label = e.target.parentElement.querySelector("[data-files]");
+    label.dataset.empty ??= label.textContent;
+    label.textContent = [...e.target.files].map((f) => f.name).join(", ") || label.dataset.empty;
+  }
+});
+
 // ---- collapsible columns: [data-toggle-pane="sidebar"|"list"] and Ctrl+\ for both ----
 
 const paneIds = { sidebar: "sidebar", list: "list-pane" };
