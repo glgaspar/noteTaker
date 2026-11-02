@@ -27,6 +27,7 @@ const commands = {
   task: (c) => c.toggleTaskList(),
   quote: (c) => c.toggleBlockquote(),
   codeblock: (c) => c.toggleCodeBlock(),
+  attach: (c) => (document.getElementById("attach-input").click(), c),
 };
 
 // baseExtensions are the editor features shared by live and static editors.
@@ -93,7 +94,36 @@ export function mountEditor(el) {
       }),
     ],
     onSelectionUpdate: syncLanguage,
+    editorProps: {
+      handlePaste: (view, event) => insertFiles(event.clipboardData?.files),
+      handleDrop: (view, event, slice, moved) =>
+        !moved && insertFiles(event.dataTransfer?.files, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos),
+    },
   });
+
+  // insertFiles uploads files and inserts them at pos (default: the cursor): images inline,
+  // other files as links. It returns false when there is nothing to upload.
+  function insertFiles(fileList, pos) {
+    const files = [...(fileList || [])];
+    if (!files.length || !editor.isEditable) return false;
+    for (const file of files) {
+      status.textContent = `Uploading ${file.name}…`;
+      const body = new FormData();
+      body.append("file", file);
+      fetch(`/notes/${id}/attachments`, { method: "POST", body })
+        .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
+        .then(({ url, name, image }) => {
+          const node = image
+            ? { type: "image", attrs: { src: url, alt: name } }
+            : { type: "paragraph", content: [{ type: "text", text: name, marks: [{ type: "link", attrs: { href: url } }] }] };
+          const at = Math.min(pos ?? editor.state.selection.to, editor.state.doc.content.size);
+          editor.chain().focus().insertContentAt(at, node).run();
+          status.textContent = "";
+        })
+        .catch((e) => (status.textContent = `Upload failed: ${e.message.trim()}`));
+    }
+    return true;
+  }
 
   doc.on("update", (_, origin) => {
     if (origin !== provider) schedule();
@@ -152,6 +182,11 @@ export function mountEditor(el) {
   });
 
   if (toolbar) {
+    const picker = document.getElementById("attach-input");
+    picker.addEventListener("change", () => {
+      insertFiles(picker.files);
+      picker.value = "";
+    });
     toolbar.addEventListener("click", (e) => {
       const b = e.target.closest("[data-cmd]");
       if (b) commands[b.dataset.cmd](editor.chain().focus()).run();

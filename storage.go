@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"mime"
@@ -67,6 +69,44 @@ func (s *server) putAttachment(ctx context.Context, noteID int64, name, mimeType
 		return 0, err
 	}
 	return id, nil
+}
+
+const maxUpload = 25 << 20
+
+// uploadFile stores a file pasted, dropped or attached in the editor.
+func (s *server) uploadFile(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.editable(w, r, noteRole); !ok {
+		return
+	}
+	if s.files == nil {
+		http.Error(w, "file storage is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpload+1<<20)
+	f, fh, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file missing or larger than 25 MB", http.StatusBadRequest)
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxUpload+1))
+	if err != nil || len(data) > maxUpload {
+		http.Error(w, "file larger than 25 MB", http.StatusBadRequest)
+		return
+	}
+	mimeType := fh.Header.Get("Content-Type")
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = http.DetectContentType(data)
+	}
+	id, err := s.putAttachment(r.Context(), pathID(r, "id"), fh.Filename, mimeType, data)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"url": fmt.Sprintf("/files/%d", id), "name": fh.Filename, "image": strings.HasPrefix(mimeType, "image/"),
+	})
 }
 
 // serveFile streams an attachment to users who can see its note.

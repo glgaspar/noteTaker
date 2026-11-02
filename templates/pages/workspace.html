@@ -70,6 +70,9 @@
           <span class="mx-1 h-5 w-px bg-stone-200"></span>
           <button data-cmd="codeblock" class="rounded px-2 py-1 font-mono hover:bg-stone-100">{ }</button>
           <select id="code-language" class="rounded border border-stone-200 px-1 py-0.5 text-xs"><option value="">auto</option></select>
+          <span class="mx-1 h-5 w-px bg-stone-200"></span>
+          <button data-cmd="attach" class="rounded px-2 py-1 hover:bg-stone-100" title="Attach files or images">📎</button>
+          <input id="attach-input" type="file" multiple hidden>
         </div>
         {{end}}
         <div id="editor" class="prose prose-stone max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"

@@ -126,6 +126,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("GET /w/{id}/import", auth(s.importPage))
 	mux.Handle("POST /w/{id}/import", auth(s.importNotes))
 	mux.Handle("GET /files/{id}", auth(s.serveFile))
+	mux.Handle("POST /notes/{id}/attachments", auth(s.uploadFile))
 	mux.Handle("GET /w/{id}/members", auth(s.workspaceMembers))
 	mux.Handle("POST /w/{id}/members", auth(s.addWorkspaceMember))
 	mux.Handle("POST /w/{id}/members/{user}/delete", auth(s.removeWorkspaceMember))
