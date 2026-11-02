@@ -27,6 +27,27 @@ type sharePage struct {
 	Members   []member
 	CanManage bool
 	Error     string
+	Known     []member // people to suggest in the email field
+}
+
+// knownUsers lists people the user already works with: members of their workspaces and people
+// with folder shares in them. Share forms suggest only these, so the user list stays private.
+func (s *server) knownUsers(r *http.Request) []member {
+	rows, err := s.db.Query(r.Context(), `
+		WITH mine AS (SELECT workspace_id FROM workspace_members WHERE user_id = $1)
+		SELECT u.id, u.name, u.email, '' FROM users u
+		WHERE u.id <> $1 AND u.disabled_at IS NULL AND u.id IN (
+			SELECT user_id FROM workspace_members WHERE workspace_id IN (SELECT workspace_id FROM mine)
+			UNION
+			SELECT fm.user_id FROM folder_members fm JOIN folders f ON f.id = fm.folder_id
+			WHERE f.workspace_id IN (SELECT workspace_id FROM mine))
+		ORDER BY lower(u.name)`, currentUser(r).ID)
+	if err != nil {
+		log.Printf("known users: %v", err)
+		return nil
+	}
+	known, _ := pgx.CollectRows(rows, pgx.RowToStructByPos[member])
+	return known
 }
 
 func (s *server) members(r *http.Request, query string, id int64) ([]member, error) {
@@ -75,6 +96,7 @@ func (s *server) renderWorkspaceMembers(w http.ResponseWriter, r *http.Request, 
 	s.render(w, "share.html", sharePage{
 		User: user, Title: "Workspace members", Subject: ws.Name, Members: members, Error: msg,
 		Action: fmt.Sprintf("/w/%d/members", ws.ID), Back: fmt.Sprintf("/w/%d", ws.ID), CanManage: ws.Role == "owner",
+		Known: s.knownUsers(r),
 	})
 }
 
@@ -171,6 +193,7 @@ func (s *server) renderFolderShares(w http.ResponseWriter, r *http.Request, msg 
 	s.render(w, "share.html", sharePage{
 		User: currentUser(r), Title: "Share folder", Subject: name, Members: members, Error: msg, CanManage: true,
 		Action: fmt.Sprintf("/folders/%d/share", id), Back: fmt.Sprintf("/w/%d?folder=%d", ws.ID, id),
+		Known: s.knownUsers(r),
 	})
 }
 
