@@ -1,104 +1,188 @@
 {{define "main"}}
-<div class="flex min-h-0 flex-1">
+<div class="flex h-dvh">
   {{template "sidebar" .}}
-  <section class="flex w-72 shrink-0 flex-col border-r border-stone-200 bg-white">
-    <div class="flex items-center border-b border-stone-200 px-4 py-3">
-      <span class="font-semibold">Notes</span>
+
+  <section id="list-pane" class="flex w-80 shrink-0 flex-col border-r border-line">
+    <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+      {{if .TagID}}{{icon "hash" "text-faint"}}{{else if .FolderID}}{{icon "folder-open" "text-faint"}}{{else}}{{icon "file-text" "text-faint"}}{{end}}
+      <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
+      <span class="text-[12px] text-faint">{{len .Notes}}</span>
       {{if .CanCreate}}
       <form method="post" action="/w/{{.Workspace.ID}}/notes" class="ml-auto">
         {{if .FolderID}}<input type="hidden" name="folder_id" value="{{.FolderID}}">{{end}}
-        <button class="rounded bg-stone-900 px-2.5 py-1 text-sm text-white hover:bg-stone-700">+ New note</button>
+        <button class="btn-icon" title="New note">{{icon "file-plus"}}</button>
       </form>
       {{end}}
+    </header>
+    {{with .Crumbs}}{{if gt (len .) 1}}
+    <div class="-mt-2 flex items-center gap-1 truncate px-4 pb-2 text-[12px] text-faint">
+      {{range $i, $f := .}}{{if $i}}{{icon "chevron-right" "size-3"}}{{end}}<a href="/w/{{$.Workspace.ID}}?folder={{$f.ID}}" class="truncate hover:text-ink">{{$f.Name}}</a>{{end}}
     </div>
-    <ul class="flex-1 divide-y divide-stone-100 overflow-auto">
+    {{end}}{{end}}
+    <ul class="flex-1 space-y-px overflow-y-auto px-2 pb-4">
       {{range .Notes}}
       <li>
         <a href="/w/{{$.Workspace.ID}}?{{if $.FolderID}}folder={{$.FolderID}}&{{end}}{{if $.TagID}}tag={{$.TagID}}&{{end}}note={{.ID}}"
-          class="block px-4 py-3 hover:bg-stone-50 {{if and $.Note (eq .ID $.Note.ID)}}bg-stone-100{{end}}">
-          <div class="truncate font-medium" data-note-title="{{.ID}}">{{or .Title "Untitled"}}</div>
-          <div class="line-clamp-2 text-sm text-stone-500">{{.Snippet}}</div>
-          <div class="mt-1 text-xs text-stone-400">{{(local $.Loc .UpdatedAt).Format "Jan 2, 2006 15:04"}}</div>
+          class="block rounded-lg px-3 py-2.5 transition-colors hover:bg-hover {{if and $.Note (eq .ID $.Note.ID)}}bg-selected{{end}}">
+          <div class="flex items-baseline gap-2">
+            <span class="truncate font-medium {{if not .Title}}text-faint{{end}}" data-note-title="{{.ID}}">{{or .Title "Untitled"}}</span>
+            <span class="ml-auto shrink-0 text-[12px] text-faint">{{ago $.Loc .UpdatedAt}}</span>
+          </div>
+          {{with .Snippet}}<p class="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{{.}}</p>{{end}}
         </a>
       </li>
       {{else}}
-      <li class="px-4 py-6 text-sm text-stone-400">No notes here.</li>
+      <li class="flex flex-col items-center px-6 py-16 text-center">
+        <span class="mb-3 grid size-10 place-items-center rounded-full bg-hover text-faint">{{icon "inbox" "size-5"}}</span>
+        <p class="font-medium">No notes here yet</p>
+        {{if .CanCreate}}
+        <p class="mt-1 text-[13px] text-muted">Create one, or import notes from Evernote, Markdown or Obsidian.</p>
+        <form method="post" action="/w/{{.Workspace.ID}}/notes" class="mt-4">
+          {{if .FolderID}}<input type="hidden" name="folder_id" value="{{.FolderID}}">{{end}}
+          <button class="btn-primary">{{icon "plus"}} New note</button>
+        </form>
+        {{end}}
+      </li>
       {{end}}
     </ul>
   </section>
 
   {{with .Note}}
-  <section class="flex min-w-0 flex-1 flex-col bg-white">
-    <div class="flex items-center gap-3 border-b border-stone-200 px-6 py-2 text-sm text-stone-500">
-      {{if .CanEdit}}
-      <form method="post" action="/notes/{{.ID}}/move">
-        <select name="folder_id" onchange="this.form.requestSubmit()" class="rounded border border-stone-200 px-2 py-1">
-          {{if $.Workspace.CanEdit}}<option value="">No folder</option>{{end}}
-          {{range $.Folders}}{{if .CanEdit}}<option value="{{.ID}}" {{if eq .ID $.Note.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}{{end}}
-        </select>
-      </form>
-      {{end}}
-      <span>{{with .Author}}by {{.}} · {{end}}updated {{(local $.Loc .UpdatedAt).Format "Jan 2, 2006 15:04"}}</span>
-      <span id="presence" class="ml-auto text-stone-600"></span>
-      <span id="save-status"></span>
-      {{if .CanEdit}}
-      <form method="post" action="/notes/{{.ID}}/delete" hx-confirm="Delete this note?">
-        <button class="rounded px-2 py-1 text-red-600 hover:bg-red-50">Delete</button>
-      </form>
-      {{end}}
-    </div>
-    <div class="flex-1 overflow-auto">
-      <div class="mx-auto max-w-3xl px-6 py-8">
-        <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not .CanEdit}}readonly{{end}}
-          class="mb-2 w-full text-3xl font-bold outline-none placeholder:text-stone-300">
-        {{template "note_tags" $.NoteTags}}
+  <section id="note-pane" class="flex min-w-0 flex-1 flex-col">
+    <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+      <nav class="flex min-w-0 items-center gap-1 text-[13px] text-muted">
+        <a href="/w/{{$.Workspace.ID}}" class="truncate hover:text-ink">{{$.Workspace.Name}}</a>
+        {{range $.NotePath}}{{icon "chevron-right" "size-3 text-faint"}}<a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="truncate hover:text-ink">{{.Name}}</a>{{end}}
+      </nav>
+      <div class="ml-auto flex items-center gap-2">
+        <div id="presence" class="flex -space-x-1.5"></div>
+        <span id="save-status" class="text-[12px] text-faint"></span>
+        <button popovertarget="note-menu" class="btn-icon" title="Note actions">{{icon "ellipsis"}}</button>
+      </div>
+      <div id="note-menu" popover data-align="end" class="menu">
         {{if .CanEdit}}
-        <div id="toolbar" class="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-1 border-y border-stone-100 bg-white py-1 text-sm">
-          <button data-cmd="bold" class="rounded px-2 py-1 font-bold hover:bg-stone-100">B</button>
-          <button data-cmd="italic" class="rounded px-2 py-1 italic hover:bg-stone-100">I</button>
-          <button data-cmd="strike" class="rounded px-2 py-1 line-through hover:bg-stone-100">S</button>
-          <button data-cmd="code" class="rounded px-2 py-1 font-mono hover:bg-stone-100">`</button>
-          <span class="mx-1 h-5 w-px bg-stone-200"></span>
-          <button data-cmd="h1" class="rounded px-2 py-1 hover:bg-stone-100">H1</button>
-          <button data-cmd="h2" class="rounded px-2 py-1 hover:bg-stone-100">H2</button>
-          <button data-cmd="h3" class="rounded px-2 py-1 hover:bg-stone-100">H3</button>
-          <span class="mx-1 h-5 w-px bg-stone-200"></span>
-          <button data-cmd="bullet" class="rounded px-2 py-1 hover:bg-stone-100">• List</button>
-          <button data-cmd="ordered" class="rounded px-2 py-1 hover:bg-stone-100">1. List</button>
-          <button data-cmd="task" class="rounded px-2 py-1 hover:bg-stone-100">☑ Tasks</button>
-          <button data-cmd="quote" class="rounded px-2 py-1 hover:bg-stone-100">❝</button>
-          <span class="mx-1 h-5 w-px bg-stone-200"></span>
-          <button data-cmd="codeblock" class="rounded px-2 py-1 font-mono hover:bg-stone-100">{ }</button>
-          <select id="code-language" class="rounded border border-stone-200 px-1 py-0.5 text-xs"><option value="">auto</option></select>
-          <span class="mx-1 h-5 w-px bg-stone-200"></span>
-          <button data-cmd="attach" class="rounded px-2 py-1 hover:bg-stone-100" title="Attach files or images">📎</button>
-          <input id="attach-input" type="file" multiple hidden>
-        </div>
+        <button class="menu-item" onclick="document.getElementById('move-dialog').showModal(); this.closest('[popover]').hidePopover()">{{icon "folder-input"}} Move to…</button>
         {{end}}
-        <div id="editor" class="prose prose-stone max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
-          data-editable="{{.CanEdit}}" data-seeded="{{.Seeded}}" data-import-html="{{.ImportHTML}}" data-user-id="{{$.User.ID}}" data-user-name="{{$.User.Name}}"></div>
+        <button class="menu-item" onclick="navigator.clipboard.writeText(location.href); this.closest('[popover]').hidePopover()">{{icon "link"}} Copy link</button>
+        {{if .CanEdit}}
+        <div class="menu-sep"></div>
+        <form method="post" action="/notes/{{.ID}}/delete" hx-confirm="“{{or .Title "Untitled"}}” will be deleted for everyone.">
+          <button class="menu-item-danger">{{icon "trash-2"}} Delete note</button>
+        </form>
+        {{end}}
+      </div>
+    </header>
+
+    <div class="flex-1 overflow-y-auto">
+      <div class="mx-auto max-w-3xl px-6 pb-24 pt-8 sm:px-12">
+        <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not .CanEdit}}readonly{{end}} autocomplete="off"
+          class="w-full bg-transparent text-[32px] font-bold leading-tight tracking-tight outline-none placeholder:text-faint">
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
+          <span>{{with .Author}}{{.}} · {{end}}edited {{ago $.Loc .UpdatedAt}}</span>
+          {{template "note_tags" $.NoteTags}}
+        </div>
+        {{if .CanEdit}}{{template "toolbar" $}}{{end}}
+        <div id="editor" class="prose prose-stone mt-4 max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
+          data-editable="{{.CanEdit}}" data-seeded="{{.Seeded}}" data-import-html="{{.ImportHTML}}"
+          data-user-id="{{$.User.ID}}" data-user-name="{{$.User.Name}}"></div>
       </div>
     </div>
+
+    {{if .CanEdit}}
+    <dialog id="move-dialog" class="dialog">
+      <form method="post" action="/notes/{{.ID}}/move" class="p-5">
+        <h2 class="text-[15px] font-semibold">Move note</h2>
+        <p class="mt-1 text-[13px] text-muted">Choose a folder for “{{or .Title "Untitled"}}”.</p>
+        <select name="folder_id" class="input mt-4">
+          {{if $.Workspace.CanEdit}}<option value="">No folder (workspace root)</option>{{end}}
+          {{range $.Folders}}{{if .CanEdit}}<option value="{{.ID}}" {{if eq .ID $.Note.FolderID}}selected{{end}}>{{.Indent}}{{.Name}}</option>{{end}}{{end}}
+        </select>
+        <div class="mt-5 flex justify-end gap-2">
+          <button type="button" data-close class="btn-ghost">Cancel</button>
+          <button class="btn-primary">Move</button>
+        </div>
+      </form>
+    </dialog>
+    {{end}}
   </section>
   {{else}}
-  <section class="flex flex-1 items-center justify-center bg-white text-stone-400">Select or create a note.</section>
+  <section class="hidden flex-1 flex-col items-center justify-center text-center md:flex">
+    <span class="mb-3 grid size-12 place-items-center rounded-full bg-hover text-faint">{{icon "notebook-pen" "size-6"}}</span>
+    <p class="font-medium">Select a note</p>
+    <p class="mt-1 text-[13px] text-muted">or press <span class="kbd">Ctrl K</span> to find one</p>
+  </section>
   {{end}}
 </div>
 {{end}}
 
+{{define "toolbar"}}
+<div id="toolbar" class="sticky top-0 z-10 -mx-2 mt-5 flex items-center gap-0.5 overflow-x-auto border-b border-line bg-canvas px-1 py-1.5">
+  <button data-cmd="undo" class="btn-icon" title="Undo (Ctrl+Z)">{{icon "undo-2"}}</button>
+  <button data-cmd="redo" class="btn-icon" title="Redo (Ctrl+Shift+Z)">{{icon "redo-2"}}</button>
+  <span class="mx-1 h-4 w-px shrink-0 bg-line"></span>
+  <button data-cmd="h1" class="btn-icon" title="Heading 1">{{icon "heading-1"}}</button>
+  <button data-cmd="h2" class="btn-icon" title="Heading 2">{{icon "heading-2"}}</button>
+  <button data-cmd="h3" class="btn-icon" title="Heading 3">{{icon "heading-3"}}</button>
+  <span class="mx-1 h-4 w-px shrink-0 bg-line"></span>
+  <button data-cmd="bold" class="btn-icon" title="Bold (Ctrl+B)">{{icon "bold"}}</button>
+  <button data-cmd="italic" class="btn-icon" title="Italic (Ctrl+I)">{{icon "italic"}}</button>
+  <button data-cmd="strike" class="btn-icon" title="Strikethrough">{{icon "strikethrough"}}</button>
+  <button data-cmd="code" class="btn-icon" title="Inline code">{{icon "code"}}</button>
+  <button data-cmd="link" class="btn-icon" title="Link">{{icon "link"}}</button>
+  <span class="mx-1 h-4 w-px shrink-0 bg-line"></span>
+  <button data-cmd="bullet" class="btn-icon" title="Bulleted list">{{icon "list"}}</button>
+  <button data-cmd="ordered" class="btn-icon" title="Numbered list">{{icon "list-ordered"}}</button>
+  <button data-cmd="task" class="btn-icon" title="Checklist">{{icon "list-todo"}}</button>
+  <button data-cmd="quote" class="btn-icon" title="Quote">{{icon "text-quote"}}</button>
+  <button data-cmd="codeblock" class="btn-icon" title="Code block">{{icon "square-code"}}</button>
+  <span class="mx-1 h-4 w-px shrink-0 bg-line"></span>
+  <button data-cmd="attach" class="btn-icon" title="Attach a file or image">{{icon "paperclip"}}</button>
+  <input id="attach-input" type="file" multiple hidden>
+  <select id="code-language" hidden title="Code language" class="ml-auto h-7 rounded-md border border-line bg-raised px-1.5 text-[12px] text-muted outline-none">
+    <option value="">Auto-detect</option>
+  </select>
+  <span class="ml-auto hidden text-[12px] text-faint lg:inline" data-hint>Type <span class="kbd">/</span> for blocks</span>
+</div>
+{{end}}
+
 {{define "note_tags"}}
-<div id="note-tags" class="mb-4 flex flex-wrap items-center gap-1 text-xs">
+<div id="note-tags" class="flex flex-wrap items-center gap-1">
   {{range .Tags}}
-  <span class="rounded-full bg-stone-100 px-2 py-0.5 text-stone-700">#{{.Name}}
+  <span class="chip">#{{.Name}}
     {{if $.CanEdit}}<button hx-post="/notes/{{$.NoteID}}/tags/{{.ID}}/delete" hx-target="#note-tags" hx-swap="outerHTML"
-      class="ml-0.5 text-stone-400 hover:text-red-600" title="Remove tag">×</button>{{end}}
+      class="-mr-0.5 cursor-pointer text-faint hover:text-danger" title="Remove tag">{{icon "x" "size-3"}}</button>{{end}}
   </span>
   {{end}}
   {{if .CanEdit}}
-  <form hx-post="/notes/{{.NoteID}}/tags" hx-target="#note-tags" hx-swap="outerHTML">
-    <input name="name" list="tag-options" placeholder="+ Add tag" autocomplete="off" {{if .Focus}}autofocus{{end}}
-      class="w-28 rounded px-2 py-0.5 outline-none hover:bg-stone-50 focus:bg-stone-50">
+  <form hx-post="/notes/{{.NoteID}}/tags" hx-target="#note-tags" hx-swap="outerHTML" class="flex items-center">
+    <input name="name" list="tag-options" placeholder="Add tag" autocomplete="off" {{if .Focus}}autofocus{{end}}
+      class="w-20 rounded bg-transparent px-1.5 py-0.5 text-[12px] text-muted outline-none placeholder:text-faint hover:bg-hover focus:w-32 focus:bg-hover">
   </form>
   {{end}}
 </div>
+{{end}}
+
+{{define "palette_results"}}
+{{if .Folders}}
+<div class="menu-label">Folders</div>
+{{range .Folders}}
+<a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="menu-item" data-option>{{icon "folder"}}<span class="truncate">{{.Name}}</span></a>
+{{end}}
+{{end}}
+<div class="menu-label">{{if .Query}}Notes{{else}}Recent notes{{end}}</div>
+{{range .Notes}}
+<a href="/w/{{.WorkspaceID}}?{{if .FolderID}}folder={{.FolderID}}&{{end}}note={{.ID}}" class="menu-item h-auto py-1.5" data-option>
+  {{icon "file-text"}}
+  <span class="min-w-0 flex-1">
+    <span class="block truncate">{{or .Title "Untitled"}}</span>
+    {{if $.Query}}{{with .Snippet}}<span class="block truncate text-[12px] text-faint [&_mark]:bg-transparent [&_mark]:font-semibold [&_mark]:text-ink">{{.}}</span>{{end}}{{end}}
+  </span>
+  <span class="shrink-0 text-[12px] text-faint">{{with .Folder}}{{.}} · {{end}}{{ago $.Loc .UpdatedAt}}</span>
+</a>
+{{else}}
+<div class="px-2 py-2 text-[13px] text-faint">No notes match.</div>
+{{end}}
+{{if .Query}}
+<a href="/w/{{.Workspace.ID}}/search?q={{.Query}}" class="menu-item" data-option>{{icon "search"}} Search everything for “{{.Query}}”</a>
+{{end}}
 {{end}}

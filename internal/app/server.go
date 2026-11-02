@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /w/{id}/rename", auth(s.renameWorkspace))
 	mux.Handle("POST /w/{id}/delete", auth(s.deleteWorkspace))
 	mux.Handle("GET /w/{id}/search", auth(s.searchPage))
+	mux.Handle("GET /w/{id}/palette", auth(s.palette))
 	mux.Handle("GET /w/{id}/import", auth(s.importPage))
 	mux.Handle("POST /w/{id}/import", auth(s.importNotes))
 	mux.Handle("GET /w/{id}/imports/{job}", auth(s.importJobPage))

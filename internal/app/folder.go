@@ -16,6 +16,21 @@ type folder struct {
 	Role     string
 	Manage   bool // may rename or delete it (needs edit rights on the parent)
 	Depth    int
+	// HasChildren: visible subfolders follow it in the tree
+	HasChildren bool
+}
+
+// folderPath returns the visible folders from the top of the tree down to id.
+func folderPath(folders []folder, id int64) []folder {
+	byID := map[int64]folder{}
+	for _, f := range folders {
+		byID[f.ID] = f
+	}
+	var path []folder
+	for f, ok := byID[id]; ok; f, ok = byID[orZero(f.ParentID)] {
+		path = append([]folder{f}, path...)
+	}
+	return path
 }
 
 func (f folder) CanEdit() bool { return canEdit(f.Role) }
@@ -53,6 +68,9 @@ func (s *Server) folderTree(ctx context.Context, ws workspace, userID int64) ([]
 		}
 	}
 	walk(0, 0, ws.Role)
+	for i := range out {
+		out[i].HasChildren = i+1 < len(out) && out[i+1].Depth > out[i].Depth
+	}
 	return out, rows.Err()
 }
 

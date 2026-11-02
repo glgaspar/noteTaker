@@ -1,6 +1,8 @@
 import htmx from "htmx.org";
 import { mountEditor } from "./editor.js";
 import { initUI } from "./ui.js";
+import { initTree } from "./tree.js";
+import "./palette.js";
 
 window.htmx = htmx;
 
@@ -17,6 +19,7 @@ let editor = null;
 
 htmx.onLoad((root) => {
   initUI();
+  initTree(root);
   const el = root.querySelector?.("#editor") || (root.id === "editor" ? root : null);
   if (el) editor = mountEditor(el);
 });

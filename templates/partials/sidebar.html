@@ -1,101 +1,125 @@
 {{define "sidebar"}}
-<aside class="w-64 shrink-0 overflow-auto border-r border-stone-200 bg-stone-100 p-3 text-sm">
-  <details class="group mb-4">
-    <summary class="flex cursor-pointer list-none items-center rounded px-2 py-1.5 font-semibold hover:bg-stone-200">
-      {{.Workspace.Name}}<span class="ml-auto text-stone-400">▾</span>
-    </summary>
-    <div class="mt-1 space-y-1 rounded border border-stone-200 bg-white p-2">
-      {{range .Workspaces}}
-      <a href="/w/{{.ID}}" class="block rounded px-2 py-1 hover:bg-stone-100 {{if eq .ID $.Workspace.ID}}font-medium{{end}}">{{.Name}}{{if not .Role}} <span class="text-xs text-stone-400">shared with you</span>{{end}}</a>
-      {{end}}
-      <form method="post" action="/workspaces" class="flex gap-1 border-t border-stone-100 pt-2">
-        <input name="name" placeholder="New workspace" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
-        <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
-      </form>
-      {{if .Workspace.Role}}
-      <a href="/w/{{.Workspace.ID}}/members" class="block rounded px-2 py-1 hover:bg-stone-100">Members…</a>
-      {{end}}
+<aside id="sidebar" class="flex w-64 shrink-0 flex-col border-r border-line bg-panel">
+  <div class="p-2">
+    <button popovertarget="ws-menu" class="flex w-full items-center gap-2 rounded-md p-1.5 text-left hover:bg-hover">
+      <span class="grid size-6 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-accent-ink">{{initials .Workspace.Name}}</span>
+      <span class="min-w-0 flex-1 truncate font-semibold">{{.Workspace.Name}}</span>
+      {{icon "chevrons-up-down" "text-faint"}}
+    </button>
+  </div>
+
+  <nav class="space-y-px px-2">
+    <button type="button" data-palette class="nav-item w-full">{{icon "search"}} Search <span class="kbd ml-auto">Ctrl K</span></button>
+    <a href="/w/{{.Workspace.ID}}" class="nav-item" {{if not (or .FolderID .TagID .Form)}}aria-current="page"{{end}}>{{icon "file-text"}} All notes</a>
+    {{if .Workspace.CanEdit}}<a href="/w/{{.Workspace.ID}}/import" class="nav-item">{{icon "upload"}} Import</a>{{end}}
+  </nav>
+
+  <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+    <div class="mb-1 flex h-6 items-center justify-between pr-0.5">
+      <span class="section-label">Folders</span>
       {{if .Workspace.CanEdit}}
-      <a href="/w/{{.Workspace.ID}}/import" class="block rounded px-2 py-1 hover:bg-stone-100">Import notes…</a>
-      <form method="post" action="/w/{{.Workspace.ID}}/rename" class="flex gap-1">
-        <input name="name" value="{{.Workspace.Name}}" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
-        <button class="rounded border border-stone-300 px-2 py-1">Rename</button>
-      </form>
-      {{end}}
-      {{if eq .Workspace.Role "owner"}}
-      <form method="post" action="/w/{{.Workspace.ID}}/delete" hx-confirm="Delete this workspace and all its notes?">
-        <button class="w-full rounded px-2 py-1 text-left text-red-600 hover:bg-red-50">Delete workspace</button>
-      </form>
+      <button class="btn-icon size-6" title="New folder"
+        data-prompt-title="New folder" data-prompt-action="/w/{{.Workspace.ID}}/folders" data-prompt-submit="Create" data-prompt-placeholder="Folder name">{{icon "plus"}}</button>
       {{end}}
     </div>
-  </details>
-  {{if not .Form}}{{/* the search page has its own box */}}
-  <form method="get" action="/w/{{.Workspace.ID}}/search" class="mb-2">
-    <input name="q" type="search" placeholder="Search notes…"
-      class="w-full rounded border border-stone-300 bg-white px-2 py-1.5">
-  </form>
-  {{end}}
-  <a href="/w/{{.Workspace.ID}}" class="mb-1 block rounded px-2 py-1.5 hover:bg-stone-200 {{if not (or .FolderID .TagID)}}bg-stone-200 font-medium{{end}}">All notes</a>
-  <div class="mb-1 mt-4 flex items-center px-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Folders</div>
-  {{if .Workspace.CanEdit}}
-  <form method="post" action="/w/{{.Workspace.ID}}/folders" class="mb-2 flex gap-1 px-2">
-    <input name="name" placeholder="New folder" required class="min-w-0 flex-1 rounded border border-stone-300 bg-white px-2 py-1">
-    <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
-  </form>
-  {{end}}
-  <ul>
-    {{range .Folders}}
-    <li class="group relative">
-      <a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" style="padding-left: {{.Depth}}rem"
-        class="block truncate rounded py-1.5 pr-8 hover:bg-stone-200 {{if eq .ID $.FolderID}}bg-stone-200 font-medium{{end}}">
-        <span class="pl-2">📁 {{.Name}}</span>
-      </a>
-      {{if or .CanEdit .Manage $.Workspace.CanEdit}}
-      <details class="absolute right-1 top-1">
-        <summary class="cursor-pointer list-none rounded px-1.5 text-stone-400 opacity-0 hover:bg-stone-300 group-hover:opacity-100">⋯</summary>
-        <div class="absolute right-0 z-10 mt-1 w-56 space-y-1 rounded border border-stone-200 bg-white p-2 shadow">
-          {{if .CanEdit}}
-          <form method="post" action="/w/{{$.Workspace.ID}}/folders" class="flex gap-1">
-            <input type="hidden" name="parent_id" value="{{.ID}}">
-            <input name="name" placeholder="New subfolder" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
-            <button class="rounded bg-stone-900 px-2 py-1 text-white">+</button>
-          </form>
-          {{end}}
-          {{if .CanEdit}}
-          <a href="/w/{{$.Workspace.ID}}/import?folder={{.ID}}" class="block rounded px-2 py-1 hover:bg-stone-100">Import here…</a>
-          {{end}}
-          {{if $.Workspace.CanEdit}}
-          <a href="/folders/{{.ID}}/share" class="block rounded px-2 py-1 hover:bg-stone-100">Share…</a>
-          {{end}}
-          {{if .Manage}}
-          <a href="/folders/{{.ID}}/move" class="block rounded px-2 py-1 hover:bg-stone-100">Move…</a>
-          <form method="post" action="/folders/{{.ID}}/rename" class="flex gap-1">
-            <input name="name" value="{{.Name}}" required class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1">
-            <button class="rounded border border-stone-300 px-2 py-1">Rename</button>
-          </form>
-          <form method="post" action="/folders/{{.ID}}/delete" hx-confirm="Delete this folder, its subfolders and notes?">
-            <button class="w-full rounded px-2 py-1 text-left text-red-600 hover:bg-red-50">Delete folder</button>
-          </form>
+    <ul id="folder-tree" class="space-y-px">
+      {{range .Folders}}
+      <li data-folder="{{.ID}}" data-depth="{{.Depth}}" {{if .HasChildren}}data-parent{{end}} {{if eq .ID $.FolderID}}data-current{{end}}>
+        <div class="nav-item group relative h-7 gap-1 pr-1 {{if eq .ID $.FolderID}}is-current{{end}}" style="padding-left: calc({{.Depth}} * 12px + 2px)">
+          {{if .HasChildren}}
+          <button type="button" data-toggle class="grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-ink" title="Expand">
+            {{icon "chevron-right" "size-3.5 transition-transform"}}
+          </button>
+          {{else}}<span class="size-5 shrink-0"></span>{{end}}
+          <a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+            {{icon "folder" "text-faint"}}<span class="truncate">{{.Name}}</span>
+          </a>
+          {{if or .CanEdit .Manage $.Workspace.CanEdit}}
+          <button popovertarget="folder-menu" class="btn-icon size-6 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Folder actions"
+            data-menu-id="{{.ID}}" data-menu-name="{{.Name}}"
+            {{if .CanEdit}}data-menu-edit{{end}} {{if .Manage}}data-menu-manage{{end}} {{if $.Workspace.CanEdit}}data-menu-share{{end}}>{{icon "ellipsis"}}</button>
           {{end}}
         </div>
-      </details>
+      </li>
+      {{else}}
+      <li class="px-2 py-1 text-[13px] text-faint">No folders yet</li>
       {{end}}
-    </li>
+    </ul>
+
+    {{if .Tags}}
+    <div class="mb-1 mt-5 flex h-6 items-center"><span class="section-label">Tags</span></div>
+    <ul class="space-y-px">
+      {{range .Tags}}
+      <li>
+        <a href="/w/{{$.Workspace.ID}}?tag={{.ID}}" class="nav-item h-7" {{if eq .ID $.TagID}}aria-current="page"{{end}}>
+          {{icon "hash" "text-faint"}}<span class="truncate">{{.Name}}</span><span class="ml-auto text-[12px] text-faint">{{.Count}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    <datalist id="tag-options">{{range .Tags}}<option value="{{.Name}}">{{end}}</datalist>
     {{end}}
-  </ul>
-  {{if .Tags}}
-  <div class="mb-1 mt-4 px-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Tags</div>
-  <ul>
-    {{range .Tags}}
-    <li>
-      <a href="/w/{{$.Workspace.ID}}?tag={{.ID}}"
-        class="flex rounded px-2 py-1.5 hover:bg-stone-200 {{if eq .ID $.TagID}}bg-stone-200 font-medium{{end}}">
-        <span class="truncate">#{{.Name}}</span><span class="ml-auto text-stone-400">{{.Count}}</span>
-      </a>
-    </li>
+  </div>
+
+  <div class="border-t border-line p-2">{{template "usermenu" .}}</div>
+
+  <dialog id="palette" class="dialog mt-[12vh] w-[min(36rem,calc(100vw-2rem))]" data-workspace="{{.Workspace.ID}}">
+    <div class="flex items-center gap-2 border-b border-line px-4">
+      {{icon "search" "text-faint"}}
+      <input data-palette-input placeholder="Search notes and folders…" autocomplete="off" class="h-12 flex-1 bg-transparent text-[15px] outline-none placeholder:text-faint">
+      <span class="kbd">Esc</span>
+    </div>
+    <div class="max-h-[60vh] overflow-y-auto p-1">
+      <div data-palette-results></div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">Actions</div>
+      {{if .Workspace.CanEdit}}
+      <form method="post" action="/w/{{.Workspace.ID}}/notes"><button class="menu-item" data-option>{{icon "file-plus"}} New note</button></form>
+      <button class="menu-item" data-option data-prompt-title="New folder" data-prompt-action="/w/{{.Workspace.ID}}/folders" data-prompt-submit="Create" data-prompt-placeholder="Folder name">{{icon "folder-plus"}} New folder</button>
+      <a href="/w/{{.Workspace.ID}}/import" class="menu-item" data-option>{{icon "upload"}} Import notes</a>
+      {{end}}
+      <a href="/w/{{.Workspace.ID}}/search" class="menu-item" data-option>{{icon "search"}} Advanced search</a>
+    </div>
+  </dialog>
+
+  <div id="ws-menu" popover class="menu w-64">
+    <div class="menu-label">Workspaces</div>
+    {{range .Workspaces}}
+    <a href="/w/{{.ID}}" class="menu-item">
+      <span class="grid size-5 shrink-0 place-items-center rounded bg-hover text-[10px] font-semibold text-muted">{{initials .Name}}</span>
+      <span class="min-w-0 flex-1 truncate">{{.Name}}</span>
+      {{if not .Role}}<span class="text-[11px] text-faint">shared</span>{{end}}
+      {{if eq .ID $.Workspace.ID}}{{icon "check" "text-accent"}}{{end}}
+    </a>
     {{end}}
-  </ul>
-  <datalist id="tag-options">{{range .Tags}}<option value="{{.Name}}">{{end}}</datalist>
-  {{end}}
+    <button class="menu-item" data-prompt-title="New workspace" data-prompt-action="/workspaces" data-prompt-submit="Create" data-prompt-placeholder="Workspace name">{{icon "plus"}} New workspace</button>
+    {{if .Workspace.Role}}
+    <div class="menu-sep"></div>
+    <a href="/w/{{.Workspace.ID}}/members" class="menu-item">{{icon "users"}} Members</a>
+    {{end}}
+    {{if .Workspace.CanEdit}}
+    <button class="menu-item" data-prompt-title="Rename workspace" data-prompt-action="/w/{{.Workspace.ID}}/rename" data-prompt-value="{{.Workspace.Name}}">{{icon "pencil"}} Rename</button>
+    {{end}}
+    {{if eq .Workspace.Role "owner"}}
+    <form method="post" action="/w/{{.Workspace.ID}}/delete" hx-confirm="“{{.Workspace.Name}}” and all its folders and notes will be deleted for everyone.">
+      <button class="menu-item-danger">{{icon "trash-2"}} Delete workspace</button>
+    </form>
+    {{end}}
+  </div>
+
+  <div id="folder-menu" popover data-shared data-align="end" class="menu">
+    <button class="menu-item" data-requires="edit" data-fill="data-prompt-field-parent_id"
+      data-prompt-title="New subfolder" data-prompt-action="/w/{{.Workspace.ID}}/folders" data-prompt-field-parent_id="{id}" data-prompt-submit="Create" data-prompt-placeholder="Folder name">{{icon "folder-plus"}} New subfolder</button>
+    <a class="menu-item" data-requires="edit" data-fill="href" href="/w/{{.Workspace.ID}}/import?folder={id}">{{icon "upload"}} Import here</a>
+    <a class="menu-item" data-requires="share" data-fill="href" href="/folders/{id}/share">{{icon "share-2"}} Share</a>
+    <div class="menu-sep" data-requires="manage"></div>
+    <button class="menu-item" data-requires="manage" data-fill="data-prompt-action,data-prompt-value"
+      data-prompt-title="Rename folder" data-prompt-action="/folders/{id}/rename" data-prompt-value="{name}">{{icon "pencil"}} Rename</button>
+    <a class="menu-item" data-requires="manage" data-fill="href" href="/folders/{id}/move">{{icon "folder-input"}} Move</a>
+    <form method="post" data-requires="manage" data-fill="action" action="/folders/{id}/delete" hx-boost="false"
+      data-confirm="This folder, its subfolders and their notes will be deleted for everyone.">
+      <button class="menu-item-danger">{{icon "trash-2"}} Delete</button>
+    </form>
+  </div>
 </aside>
 {{end}}

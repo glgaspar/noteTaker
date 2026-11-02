@@ -40,7 +40,8 @@
 
 {{define "dialogs"}}
 <dialog id="prompt-dialog" class="dialog">
-  <form method="post" class="p-5">
+  {{/* not boosted: htmx reads a form's action once, and this one changes for every use */}}
+  <form method="post" hx-boost="false" class="p-5">
     <h2 data-title class="text-[15px] font-semibold"></h2>
     <p data-label class="mt-1 text-[13px] text-muted empty:hidden"></p>
     <input name="name" required autocomplete="off" class="input mt-4">

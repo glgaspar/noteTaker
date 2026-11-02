@@ -242,5 +242,21 @@ func (s *Server) workspacePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data["Notes"], data["Note"], data["NoteTags"], data["CanCreate"] = notes, n, nt, canCreate
+	folders := data["Folders"].([]folder)
+	data["ListTitle"] = "All notes"
+	if folderID != 0 {
+		data["Crumbs"] = folderPath(folders, folderID)
+		if path := data["Crumbs"].([]folder); len(path) > 0 {
+			data["ListTitle"] = path[len(path)-1].Name
+		}
+	}
+	for _, t := range data["Tags"].([]tag) {
+		if t.ID == tagID {
+			data["ListTitle"] = "#" + t.Name
+		}
+	}
+	if n != nil {
+		data["NotePath"] = folderPath(folders, n.FolderID)
+	}
 	s.render(w, "workspace.html", data)
 }

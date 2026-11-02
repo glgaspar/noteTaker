@@ -66,21 +66,22 @@ try {
 
   // Workspace shared with Bob, and a note both open.
   await admin.goto(`${B}/`);
-  await admin.evaluate(() => (document.querySelector("details").open = true));
-  await admin.type("form[action='/workspaces'] input", `E2E ${Date.now()}`);
-  await Promise.all([admin.waitForNavigation(), admin.click("form[action='/workspaces'] button")]);
+  await admin.click("[popovertarget='ws-menu']");
+  await admin.click("#ws-menu button[data-prompt-action='/workspaces']");
+  await admin.type("#prompt-dialog input[name=name]", `E2E ${Date.now()}`);
+  await Promise.all([admin.waitForNavigation(), admin.click("#prompt-dialog [data-submit]")]);
   const ws = admin.url().match(/\/w\/(\d+)/)[1];
   await admin.goto(`${B}/w/${ws}/members`);
   await admin.type("input[name=email]", email);
   await Promise.all([admin.waitForNavigation(), admin.click("form[action$='/members'] button")]);
   await admin.goto(`${B}/w/${ws}`);
-  await Promise.all([admin.waitForNavigation(), admin.click("form[action$='/notes'] button")]);
+  await Promise.all([admin.waitForNavigation(), admin.click("#list-pane form[action$='/notes'] button")]);
   await admin.waitForSelector(".ProseMirror");
   const noteURL = admin.url();
   await bob.goto(noteURL);
   await bob.waitForSelector(".ProseMirror");
   await sleep(800);
-  check("presence shows the other user", (await admin.$eval("#presence", (e) => e.textContent)).includes("E2E Bob"));
+  check("presence shows the other user", (await admin.$eval("#presence", (e) => e.innerHTML)).includes("E2E Bob is here"));
 
   // Live co-editing converges; titles merge.
   await admin.click(".tiptap");

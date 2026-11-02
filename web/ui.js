@@ -126,7 +126,7 @@ document.addEventListener("click", (e) => {
     value: el.dataset.promptValue,
     submit: el.dataset.promptSubmit,
     placeholder: el.dataset.promptPlaceholder,
-    action: el.dataset.promptAction || el.getAttribute("data-prompt-action"),
+    action: el.dataset.promptAction,
     fields,
   });
 });
@@ -147,6 +147,18 @@ export function confirmDialog(question, confirmLabel = "Delete") {
     dialog.onclose = () => resolve(false);
   });
 }
+
+// Forms that htmx does not handle (hx-boost="false") confirm with data-confirm.
+document.addEventListener("submit", (e) => {
+  const form = e.target;
+  if (!form.dataset.confirm || form.dataset.confirmed) return;
+  e.preventDefault();
+  confirmDialog(form.dataset.confirm, form.dataset.confirmLabel).then((ok) => {
+    if (!ok) return;
+    form.dataset.confirmed = "1";
+    form.requestSubmit();
+  });
+});
 
 // hx-confirm uses our dialog instead of the browser's.
 document.addEventListener("htmx:confirm", (e) => {
