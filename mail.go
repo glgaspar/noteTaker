@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"mime"
 	"net/smtp"
+	"strings"
 	"time"
 )
 
@@ -19,6 +21,9 @@ func (s *server) sendMail(to, subject, body string) error {
 		log.Printf("SMTP not configured; email to %s (%s):\n%s", to, subject, body)
 		return nil
 	}
+	// Subjects can contain user-chosen names: no line breaks (header injection), and
+	// non-ASCII text must be encoded.
+	subject = mime.QEncoding.Encode("utf-8", strings.NewReplacer("\r", " ", "\n", " ").Replace(subject))
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		s.smtp.from, to, subject, time.Now().Format(time.RFC1123Z), body)
 	var auth smtp.Auth

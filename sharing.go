@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -101,14 +103,21 @@ func (s *server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		s.renderWorkspaceMembers(w, r, msg)
 		return
 	}
-	if _, err := s.db.Exec(r.Context(), `
+	var added bool // xmax = 0 only for a freshly inserted row
+	err = s.db.QueryRow(r.Context(), `
 		INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)
-		ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = $3 WHERE workspace_members.role <> 'owner'`,
-		ws.ID, userID, role); err != nil {
+		ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = $3 WHERE workspace_members.role <> 'owner'
+		RETURNING xmax = 0`, ws.ID, userID, role).Scan(&added)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		serverError(w, err)
 		return
 	}
 	s.hub.kick(userID)
+	if added {
+		var name string
+		s.db.QueryRow(r.Context(), `SELECT name FROM workspaces WHERE id = $1`, ws.ID).Scan(&name)
+		s.notifyShare(userID, currentUser(r).Name, fmt.Sprintf("the workspace %q", name), role, fmt.Sprintf("/w/%d", ws.ID))
+	}
 	redirect(w, r, fmt.Sprintf("/w/%d/members", ws.ID))
 }
 
@@ -182,13 +191,22 @@ func (s *server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 		s.renderFolderShares(w, r, msg)
 		return
 	}
-	if _, err := s.db.Exec(r.Context(), `
+	var added bool // xmax = 0 only for a freshly inserted row
+	if err := s.db.QueryRow(r.Context(), `
 		INSERT INTO folder_members (folder_id, user_id, role) VALUES ($1, $2, $3)
-		ON CONFLICT (folder_id, user_id) DO UPDATE SET role = $3`, pathID(r, "id"), userID, role); err != nil {
+		ON CONFLICT (folder_id, user_id) DO UPDATE SET role = $3
+		RETURNING xmax = 0`, pathID(r, "id"), userID, role).Scan(&added); err != nil {
 		serverError(w, err)
 		return
 	}
 	s.hub.kick(userID)
+	if added {
+		var name string
+		var wsID int64
+		s.db.QueryRow(r.Context(), `SELECT name, workspace_id FROM folders WHERE id = $1`, pathID(r, "id")).Scan(&name, &wsID)
+		s.notifyShare(userID, currentUser(r).Name, fmt.Sprintf("the folder %q", name), role,
+			fmt.Sprintf("/w/%d?folder=%d", wsID, pathID(r, "id")))
+	}
 	redirect(w, r, fmt.Sprintf("/folders/%d/share", pathID(r, "id")))
 }
 
@@ -204,4 +222,19 @@ func (s *server) removeFolderShare(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.kick(target)
 	redirect(w, r, fmt.Sprintf("/folders/%d/share", pathID(r, "id")))
+}
+
+// notifyShare emails a user that something was shared with them, without delaying the request.
+func (s *server) notifyShare(userID int64, sharer, what, role, path string) {
+	go func() {
+		var email string
+		if err := s.db.QueryRow(context.Background(), `SELECT email FROM users WHERE id = $1`, userID).Scan(&email); err != nil {
+			return
+		}
+		body := fmt.Sprintf("%s shared %s with you on NoteTaker. You can %s it.\n\nOpen it: %s%s\n",
+			sharer, what, map[string]string{"editor": "edit", "viewer": "view"}[role], s.baseURL, path)
+		if err := s.sendMail(email, sharer+" shared "+what+" with you", body); err != nil {
+			log.Printf("share notification to %s: %v", email, err)
+		}
+	}()
 }
