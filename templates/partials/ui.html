@@ -7,7 +7,11 @@
 {{end}}
 
 {{define "drawer-button"}}
-<button type="button" data-drawer-open class="btn-icon -ml-1.5 md:hidden" title="Menu">{{icon "menu"}}</button>
+<button type="button" data-drawer-open class="btn-icon -mr-1.5 md:hidden" title="Menu">{{icon "menu"}}</button>
+{{end}}
+
+{{define "sidebar-toggle"}}
+<button type="button" data-toggle-pane="sidebar" class="btn-icon hidden md:inline-flex" title="Show or hide the sidebar (Ctrl+\ hides both columns)">{{icon "panel-right"}}</button>
 {{end}}
 
 {{define "topbar"}}

@@ -1,6 +1,6 @@
 {{define "sidebar"}}
 {{/* On small screens the sidebar is a drawer, opened by [data-drawer-open] (see ui.js). */}}
-<aside id="sidebar" class="peer fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full flex-col border-r border-line bg-panel transition-transform duration-200 data-open:translate-x-0 md:static md:z-auto md:w-64 md:shrink-0 md:translate-x-0 md:transition-none">
+<aside id="sidebar" {{if .Collapsed.sidebar}}data-collapsed{{end}} class="peer fixed inset-y-0 right-0 z-40 flex w-72 translate-x-full flex-col border-l border-line bg-panel transition-transform duration-200 data-open:translate-x-0 md:static md:z-auto md:w-64 md:shrink-0 md:translate-x-0 md:transition-none">
   <div class="p-2">
     <button popovertarget="ws-menu" class="flex w-full items-center gap-2 rounded-md p-1.5 text-left hover:bg-hover">
       <span class="grid size-6 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-accent-ink">{{initials .Workspace.Name}}</span>

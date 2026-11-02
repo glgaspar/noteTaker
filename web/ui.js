@@ -180,6 +180,34 @@ document.addEventListener("htmx:confirm", (e) => {
   confirmDialog(e.detail.question, e.detail.elt.dataset.confirmLabel).then((ok) => ok && e.detail.issueRequest(true));
 });
 
+// ---- collapsible columns: [data-toggle-pane="sidebar"|"list"] and Ctrl+\ for both ----
+
+const paneIds = { sidebar: "sidebar", list: "list-pane" };
+
+function savePanes() {
+  const hidden = Object.entries(paneIds)
+    .filter(([, id]) => document.getElementById(id)?.hasAttribute("data-collapsed"))
+    .map(([name]) => name);
+  document.cookie = `collapsed=${hidden.join(".")}; path=/; max-age=31536000; samesite=lax`;
+}
+
+document.addEventListener("click", (e) => {
+  const button = e.target.closest("[data-toggle-pane]");
+  if (!button) return;
+  document.getElementById(paneIds[button.dataset.togglePane])?.toggleAttribute("data-collapsed");
+  savePanes();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.key !== "\\") return;
+  e.preventDefault();
+  // The list only collapses next to an open note.
+  const panes = [document.getElementById("sidebar"), document.getElementById("note-pane") && document.getElementById("list-pane")].filter(Boolean);
+  const hide = panes.some((p) => !p.hasAttribute("data-collapsed"));
+  panes.forEach((p) => p.toggleAttribute("data-collapsed", hide));
+  savePanes();
+});
+
 // ---- sidebar drawer on small screens ----
 
 document.addEventListener("click", (e) => {

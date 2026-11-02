@@ -186,6 +186,14 @@
   }
 }
 
+/* Columns the user collapsed (desktop only; on phones the sidebar is a drawer). */
+@media (min-width: 48rem) {
+  #sidebar[data-collapsed],
+  #list-pane[data-collapsed] {
+    display: none;
+  }
+}
+
 /* ---- editor ---- */
 
 .tiptap {

@@ -258,3 +258,15 @@ func (s *Server) moveFolder(w http.ResponseWriter, r *http.Request) {
 	s.hub.KickNotes(notes) // shares inherited from the old or new parents changed
 	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
 }
+
+// collapsedPanes reads which columns the user hid ("sidebar", "list"), kept in the
+// "collapsed" cookie by ui.js and rendered here so pages do not jump on load.
+func collapsedPanes(r *http.Request) map[string]bool {
+	panes := map[string]bool{}
+	if c, err := r.Cookie("collapsed"); err == nil {
+		for _, p := range strings.Split(c.Value, ".") {
+			panes[p] = true
+		}
+	}
+	return panes
+}

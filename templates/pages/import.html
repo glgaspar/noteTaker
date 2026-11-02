@@ -1,10 +1,11 @@
 {{define "main"}}
-<div class="flex h-dvh">
+{{/* the sidebar (first in the markup) shows on the right */}}
+<div class="flex h-dvh flex-row-reverse">
   {{template "sidebar" .}}
   <main class="min-w-0 flex-1 overflow-y-auto">
     <header class="flex h-12 items-center gap-2 px-4">
-      {{template "drawer-button"}}
       {{icon "upload" "text-faint"}}<h1 class="text-[15px] font-semibold">Import notes</h1>
+      <span class="ml-auto">{{template "sidebar-toggle"}}</span>{{template "drawer-button"}}
     </header>
     <div class="mx-auto max-w-xl px-5 pb-16 pt-6">
       <p class="text-[13px] text-muted">

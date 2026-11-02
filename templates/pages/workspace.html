@@ -1,10 +1,10 @@
 {{define "main"}}
-<div class="flex h-dvh">
+{{/* the sidebar (first in the markup) shows on the right */}}
+<div class="flex h-dvh flex-row-reverse">
   {{template "sidebar" .}}
 
-  <section id="list-pane" class="{{if .Note}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-80 md:border-r">
+  <section id="list-pane" {{if and .Note .Collapsed.list}}data-collapsed{{end}} class="{{if .Note}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-80 md:border-l">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
-      {{template "drawer-button"}}
       {{if .TagID}}{{icon "hash" "text-faint"}}{{else if .FolderID}}{{icon "folder-open" "text-faint"}}{{else}}{{icon "file-text" "text-faint"}}{{end}}
       <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
       <span class="text-[12px] text-faint">{{len .Notes}}</span>
@@ -14,6 +14,8 @@
         <button class="btn-icon" title="New note">{{icon "file-plus"}}</button>
       </form>
       {{end}}
+      {{if not .Note}}<span class="{{if not .CanCreate}}ml-auto{{end}}">{{template "sidebar-toggle"}}</span>{{end}}
+      {{template "drawer-button"}}
     </header>
     {{with .Crumbs}}{{if gt (len .) 1}}
     <div class="-mt-2 flex items-center gap-1 truncate px-4 pb-2 text-[12px] text-faint">
@@ -61,6 +63,10 @@
         <div id="presence" class="flex -space-x-1.5"></div>
         <span id="save-status" class="text-[12px] text-faint"></span>
         <button popovertarget="note-menu" class="btn-icon" title="Note actions">{{icon "ellipsis"}}</button>
+        <span class="mx-0.5 hidden h-4 w-px bg-line md:block"></span>
+        <button type="button" data-toggle-pane="list" class="btn-icon hidden md:inline-flex" title="Show or hide the note list (Ctrl+\ hides both columns)">{{icon "list"}}</button>
+        {{template "sidebar-toggle"}}
+        {{template "drawer-button"}}
       </div>
       <div id="note-menu" popover data-align="end" class="menu">
         {{if .CanEdit}}

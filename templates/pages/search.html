@@ -1,10 +1,11 @@
 {{define "main"}}
-<div class="flex h-dvh">
+{{/* the sidebar (first in the markup) shows on the right */}}
+<div class="flex h-dvh flex-row-reverse">
   {{template "sidebar" .}}
   <main class="flex min-w-0 flex-1 flex-col">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
-      {{template "drawer-button"}}
       {{icon "search" "text-faint"}}<h1 class="text-[15px] font-semibold">Search</h1>
+      <span class="ml-auto">{{template "sidebar-toggle"}}</span>{{template "drawer-button"}}
     </header>
     <form method="get" action="/w/{{.Workspace.ID}}/search" class="mx-auto w-full max-w-3xl shrink-0 px-5 pb-4"
       hx-get="/w/{{.Workspace.ID}}/search" hx-trigger="input delay:300ms, change" hx-target="#results"
