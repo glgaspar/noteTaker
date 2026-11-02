@@ -9,6 +9,8 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import { common, createLowlight } from "lowlight";
 import * as Y from "yjs";
 import { NoteProvider } from "./collab.js";
+import { SlashCommands } from "./slash.js";
+import { openPrompt } from "./ui.js";
 
 const lowlight = createLowlight(common);
 
@@ -27,8 +29,41 @@ const commands = {
   task: (c) => c.toggleTaskList(),
   quote: (c) => c.toggleBlockquote(),
   codeblock: (c) => c.toggleCodeBlock(),
+  undo: (c) => c.undo(),
+  redo: (c) => c.redo(),
   attach: (c) => (document.getElementById("attach-input").click(), c),
 };
+
+// Which toolbar buttons light up for the formatting at the cursor.
+const active = {
+  bold: ["bold"],
+  italic: ["italic"],
+  strike: ["strike"],
+  code: ["code"],
+  link: ["link"],
+  h1: ["heading", { level: 1 }],
+  h2: ["heading", { level: 2 }],
+  h3: ["heading", { level: 3 }],
+  bullet: ["bulletList"],
+  ordered: ["orderedList"],
+  task: ["taskList"],
+  quote: ["blockquote"],
+  codeblock: ["codeBlock"],
+};
+
+// setLink asks for a URL and links the selection (an empty URL removes the link).
+function setLink(editor) {
+  openPrompt({
+    title: "Link",
+    value: editor.getAttributes("link").href || "",
+    placeholder: "https://…",
+    submit: "Apply",
+    onSubmit: (url) => {
+      const chain = editor.chain().focus().extendMarkRange("link");
+      (url.trim() ? chain.setLink({ href: url.trim() }) : chain.unsetLink()).run();
+    },
+  });
+}
 
 // baseExtensions are the editor features shared by live and static editors.
 function baseExtensions() {
@@ -60,6 +95,7 @@ export function mountEditor(el) {
   const toolbar = document.getElementById("toolbar");
   const language = document.getElementById("code-language");
   let timer = null;
+  let mounted = false;
 
   // Viewers cannot seed a note no editor has opened yet, so they get a static copy.
   if (el.dataset.editable !== "true" && el.dataset.seeded !== "true") {
@@ -80,12 +116,14 @@ export function mountEditor(el) {
         });
       }
       if (!seed) return;
+      // One transaction, so the server gets content and title together or not at all:
+      // a half-seeded note would never be seeded again.
       const content = storedContent(el);
-      if (title.value) ytitle.insert(0, title.value);
-      if (content) {
-        editor.commands.setContent(content);
-        save(false, true); // store the JSON right away, without counting it as an edit
-      }
+      doc.transact(() => {
+        if (content) editor.commands.setContent(content);
+        if (title.value) ytitle.insert(0, title.value);
+      });
+      if (content) save(false, true); // store the JSON right away, without counting it as an edit
     },
     onStatus: (s) => (status.textContent = s === "offline" ? "Offline, reconnecting…" : ""),
   });
@@ -96,12 +134,14 @@ export function mountEditor(el) {
     extensions: [
       ...baseExtensions(),
       Collaboration.configure({ document: doc }),
+      SlashCommands,
       CollaborationCaret.configure({
         provider,
         user: { name: el.dataset.userName, color: colors[el.dataset.userId % colors.length] },
       }),
     ],
-    onSelectionUpdate: syncLanguage,
+    onSelectionUpdate: syncToolbar,
+    onTransaction: syncToolbar,
     editorProps: {
       handlePaste: (view, event) => insertFiles(event.clipboardData?.files),
       handleDrop: (view, event, slice, moved) =>
@@ -133,6 +173,9 @@ export function mountEditor(el) {
     return true;
   }
 
+  mounted = true;
+  syncToolbar();
+
   doc.on("update", (_, origin) => {
     if (origin !== provider) schedule();
   });
@@ -157,10 +200,25 @@ export function mountEditor(el) {
     if (document.activeElement === title) title.setSelectionRange(start, end);
   });
   provider.awareness.on("change", () => {
-    const names = [...provider.awareness.getStates()]
-      .filter(([clientId, state]) => clientId !== doc.clientID && state.user)
-      .map(([, state]) => state.user.name);
-    presence.textContent = names.length ? `Also here: ${[...new Set(names)].join(", ")}` : "";
+    const seen = new Set();
+    const others = [...provider.awareness.getStates()]
+      .filter(([clientId, state]) => clientId !== doc.clientID && state.user && !seen.has(state.user.name) && seen.add(state.user.name))
+      .map(([, state]) => state.user);
+    presence.replaceChildren(
+      ...others.map(({ name, color }) =>
+        Object.assign(document.createElement("span"), {
+          className: "grid size-7 place-items-center rounded-full text-[11px] font-semibold text-white ring-2 ring-[var(--canvas)]",
+          textContent: name
+            .split(/\s+/)
+            .map((w) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase(),
+          title: `${name} is here`,
+          style: `background:${color}`,
+        }),
+      ),
+    );
   });
 
   function save(keepalive = false, seed = false) {
@@ -190,8 +248,18 @@ export function mountEditor(el) {
     timer = setTimeout(save, 800);
   }
 
-  function syncLanguage() {
-    if (!language) return;
+  function syncToolbar() {
+    if (!toolbar || !mounted) return; // TipTap calls this while it is still constructing
+
+    for (const b of toolbar.querySelectorAll("[data-cmd]")) {
+      const on = Boolean(active[b.dataset.cmd] && editor.isActive(...active[b.dataset.cmd]));
+      b.classList.toggle("bg-selected", on);
+      b.classList.toggle("text-ink", on);
+    }
+    const inCode = editor.isActive("codeBlock");
+    language.hidden = !inCode;
+    toolbar.querySelector("[data-hint]")?.classList.toggle("lg:inline", !inCode);
+    if (!inCode) return;
     const lang = editor.isActive("codeBlock") ? editor.getAttributes("codeBlock").language || "" : "";
     // aliases typed in markdown (```js) are not in the list yet
     if (![...language.options].some((o) => o.value === lang)) language.add(new Option(lang, lang));
@@ -226,7 +294,9 @@ export function mountEditor(el) {
     });
     toolbar.addEventListener("click", (e) => {
       const b = e.target.closest("[data-cmd]");
-      if (b) commands[b.dataset.cmd](editor.chain().focus()).run();
+      if (!b) return;
+      if (b.dataset.cmd === "link") return setLink(editor);
+      commands[b.dataset.cmd](editor.chain().focus()).run();
     });
     for (const name of lowlight.listLanguages().sort()) language.add(new Option(name, name));
     language.addEventListener("change", () => {
