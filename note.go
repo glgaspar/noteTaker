@@ -26,6 +26,7 @@ type note struct {
 	Author    string
 	UpdatedAt time.Time
 	Role      string
+	Seeded    bool // the note has a live (Yjs) document
 }
 
 func (n note) CanEdit() bool { return canEdit(n.Role) }
@@ -73,10 +74,11 @@ func (s *server) loadNote(ctx context.Context, userID, wsID, noteID int64) (*not
 	n := note{ID: noteID}
 	err := s.db.QueryRow(ctx, `
 		SELECT coalesce(n.folder_id, 0), n.title, coalesce(n.content::text, ''), coalesce(u.name, ''), n.updated_at,
-			coalesce(effective_role($3, n.workspace_id, n.folder_id), '')
+			coalesce(effective_role($3, n.workspace_id, n.folder_id), ''),
+			EXISTS (SELECT 1 FROM note_updates WHERE note_id = n.id)
 		FROM notes n LEFT JOIN users u ON u.id = n.author_id
 		WHERE n.id = $1 AND n.workspace_id = $2`, noteID, wsID, userID).
-		Scan(&n.FolderID, &n.Title, &n.Content, &n.Author, &n.UpdatedAt, &n.Role)
+		Scan(&n.FolderID, &n.Title, &n.Content, &n.Author, &n.UpdatedAt, &n.Role, &n.Seeded)
 	if err == pgx.ErrNoRows || n.Role == "" {
 		return nil, nil
 	}

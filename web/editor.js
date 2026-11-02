@@ -28,6 +28,22 @@ const commands = {
   codeblock: (c) => c.toggleCodeBlock(),
 };
 
+// baseExtensions are the editor features shared by live and static editors.
+function baseExtensions() {
+  return [
+    StarterKit.configure({ codeBlock: false, undoRedo: false }),
+    CodeBlockLowlight.configure({ lowlight }),
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    Placeholder.configure({ placeholder: "Start writing…" }),
+  ];
+}
+
+// storedContent is the note content saved on the server, used to seed an empty Yjs doc.
+function storedContent(el) {
+  return JSON.parse(el.dataset.content || "null");
+}
+
 // mountEditor turns #editor into a collaborative TipTap editor. The Yjs doc (content and
 // title) syncs live through NoteProvider; local edits are also saved as JSON and plain
 // text to PUT /notes/{id} for listing and search.
@@ -41,14 +57,20 @@ export function mountEditor(el) {
   const language = document.getElementById("code-language");
   let timer = null;
 
+  // Viewers cannot seed a note no editor has opened yet, so they get a static copy.
+  if (el.dataset.editable !== "true" && el.dataset.seeded !== "true") {
+    const editor = new Editor({ element: el, editable: false, content: storedContent(el), extensions: baseExtensions() });
+    return { el, flush: () => {}, destroy: () => editor.destroy() };
+  }
+
   const doc = new Y.Doc();
   const meta = doc.getMap("meta");
   const provider = new NoteProvider(id, doc, {
     onSynced: (seed) => {
       if (!seed) return;
-      const json = JSON.parse(el.dataset.content || "null");
+      const content = storedContent(el);
       if (title.value) meta.set("title", title.value);
-      if (json) editor.commands.setContent(json);
+      if (content) editor.commands.setContent(content);
     },
     onStatus: (s) => (status.textContent = s === "offline" ? "Offline, reconnecting…" : ""),
   });
@@ -57,11 +79,7 @@ export function mountEditor(el) {
     element: el,
     editable: el.dataset.editable === "true",
     extensions: [
-      StarterKit.configure({ codeBlock: false, undoRedo: false }),
-      CodeBlockLowlight.configure({ lowlight }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder: "Start writing…" }),
+      ...baseExtensions(),
       Collaboration.configure({ document: doc }),
       CollaborationCaret.configure({
         provider,
