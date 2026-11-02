@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"cmp"
 	"context"
@@ -11,8 +12,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
+	"mime"
 	"net/http"
+	"net/url"
 	"path"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +39,8 @@ type importedNote struct {
 	updated   *time.Time
 	tags      []string
 	resources map[string]resource // by md5 hash, referenced from <en-media hash="...">
+	// files resolves a relative image or link path to a file next to the note (zip imports).
+	files func(ref string) (resource, bool)
 }
 
 type resource struct {
@@ -65,7 +73,11 @@ func parseHTML(r io.Reader) (body *html.Node, title string, err error) {
 	return body, title, nil
 }
 
+// wikiEmbed matches Obsidian embeds like ![[image.png]] or ![[image.png|300]].
+var wikiEmbed = regexp.MustCompile(`!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]`)
+
 func markdownToHTML(src []byte) (*html.Node, error) {
+	src = wikiEmbed.ReplaceAll(src, []byte("![](<$1>)"))
 	var buf bytes.Buffer
 	if err := goldmark.New(goldmark.WithExtensions(extension.GFM)).Convert(src, &buf); err != nil {
 		return nil, err
@@ -223,8 +235,20 @@ func unwrap(n *html.Node) {
 // normalize rewrites Evernote and Markdown markup into what the editor understands, then
 // sanitizes it: checklists become TipTap task lists, Evernote code blocks become
 // <pre><code>, and <en-media> becomes whatever media returns (nil drops it).
-func normalize(root *html.Node, media func(hash string) *html.Node) {
+//
+// embed may replace the src of images and the href of links (to store embedded files); an
+// empty result leaves the URL as it is.
+func normalize(root *html.Node, media func(hash string) *html.Node, embed func(url string) string) {
 	for _, n := range elements(root) {
+		if key := map[atom.Atom]string{atom.Img: "src", atom.A: "href"}[n.DataAtom]; key != "" && embed != nil {
+			for i, a := range n.Attr {
+				if a.Key == key {
+					if u := embed(a.Val); u != "" {
+						n.Attr[i].Val = u
+					}
+				}
+			}
+		}
 		switch {
 		case n.Data == "en-media":
 			unwrap(n)
@@ -366,18 +390,40 @@ func (s *server) storeImported(ctx context.Context, wsID int64, folderID *int64,
 	if n.body == nil {
 		n.body = element(atom.Body)
 	}
+	stored := map[string]string{} // reference -> attachment URL, so repeats upload once
+	store := func(ref string, res resource) string {
+		if u, ok := stored[ref]; ok {
+			return u
+		}
+		attID, err := s.putAttachment(ctx, id, res.name, res.mime, res.data)
+		if err != nil {
+			st.Missing++
+			return ""
+		}
+		st.Files++
+		stored[ref] = fmt.Sprintf("/files/%d", attID)
+		return stored[ref]
+	}
+	embed := func(ref string) string {
+		if res, ok := dataURI(ref); ok {
+			return store(ref, res)
+		}
+		if n.files != nil && isRelative(ref) {
+			if res, ok := n.files(ref); ok {
+				return store(ref, res)
+			}
+		}
+		return ""
+	}
 	normalize(n.body, func(hash string) *html.Node {
 		res, ok := n.resources[hash]
 		if !ok {
 			return nil
 		}
-		attID, err := s.putAttachment(ctx, id, res.name, res.mime, res.data)
-		if err != nil {
-			st.Missing++
+		url := store(hash, res)
+		if url == "" {
 			return nil
 		}
-		st.Files++
-		url := fmt.Sprintf("/files/%d", attID)
 		if strings.HasPrefix(res.mime, "image/") {
 			return element(atom.Img, "src", url, "alt", res.name)
 		}
@@ -386,7 +432,7 @@ func (s *server) storeImported(ctx context.Context, wsID int64, folderID *int64,
 		p := element(atom.P)
 		p.AppendChild(a)
 		return p
-	})
+	}, embed)
 	body, err := renderChildren(n.body)
 	if err != nil {
 		return err
@@ -431,14 +477,12 @@ func (s *server) importNotes(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	var st importStats
 	for _, fh := range r.MultipartForm.File["files"] {
-		ext := strings.ToLower(path.Ext(fh.Filename))
-		name := strings.TrimSuffix(fh.Filename, path.Ext(fh.Filename))
 		f, err := fh.Open()
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		err = s.importFile(ctx, ws.ID, folderID, user.ID, ext, name, f, &st)
+		err = s.importFile(ctx, ws.ID, folderID, user.ID, fh.Filename, f, fh.Size, &st)
 		f.Close()
 		if err == errUnsupported {
 			st.Skipped = append(st.Skipped, fh.Filename)
@@ -458,24 +502,52 @@ func (s *server) importNotes(w http.ResponseWriter, r *http.Request) {
 
 var errUnsupported = fmt.Errorf("unsupported file type")
 
-// importFile imports one uploaded file. Each .enex file is a notebook, so its notes go into a
-// new folder named after it.
-func (s *server) importFile(ctx context.Context, wsID int64, folderID *int64, userID int64, ext, name string, f io.Reader, st *importStats) error {
-	if ext == ".enex" {
-		var notebook int64
-		if err := s.db.QueryRow(ctx, `INSERT INTO folders (workspace_id, parent_id, name) VALUES ($1, $2, $3) RETURNING id`,
-			wsID, folderID, name).Scan(&notebook); err != nil {
-			return err
-		}
-		return parseENEX(f, func(n importedNote) error {
-			return s.storeImported(ctx, wsID, &notebook, userID, n, st)
-		})
+// upload is an uploaded file: multipart files and *os.File both qualify.
+type upload interface {
+	io.Reader
+	io.ReaderAt
+}
+
+// importFile imports one uploaded file.
+func (s *server) importFile(ctx context.Context, wsID int64, folderID *int64, userID int64, filename string, f upload, size int64, st *importStats) error {
+	ext := strings.ToLower(path.Ext(filename))
+	name := strings.TrimSuffix(filename, path.Ext(filename))
+	switch ext {
+	case ".zip":
+		return s.importZip(ctx, wsID, folderID, userID, name, f, size, st)
+	case ".enex":
+		return s.importENEX(ctx, wsID, folderID, userID, name, f, st)
 	}
 	src, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
-	n := importedNote{title: name}
+	return s.importDoc(ctx, wsID, folderID, userID, ext, name, src, nil, st)
+}
+
+// importENEX imports an Evernote notebook into a new folder named after it.
+func (s *server) importENEX(ctx context.Context, wsID int64, folderID *int64, userID int64, name string, r io.Reader, st *importStats) error {
+	notebook, err := s.newFolder(ctx, wsID, folderID, name)
+	if err != nil {
+		return err
+	}
+	return parseENEX(r, func(n importedNote) error {
+		return s.storeImported(ctx, wsID, &notebook, userID, n, st)
+	})
+}
+
+func (s *server) newFolder(ctx context.Context, wsID int64, parentID *int64, name string) (int64, error) {
+	var id int64
+	err := s.db.QueryRow(ctx, `INSERT INTO folders (workspace_id, parent_id, name) VALUES ($1, $2, $3) RETURNING id`,
+		wsID, parentID, name).Scan(&id)
+	return id, err
+}
+
+// importDoc imports one Markdown, HTML or text document.
+func (s *server) importDoc(ctx context.Context, wsID int64, folderID *int64, userID int64, ext, name string, src []byte,
+	files func(string) (resource, bool), st *importStats) error {
+	n := importedNote{title: name, files: files}
+	var err error
 	switch ext {
 	case ".md", ".markdown":
 		n.body, err = markdownToHTML(src)
@@ -492,4 +564,156 @@ func (s *server) importFile(ctx context.Context, wsID int64, folderID *int64, us
 		return err
 	}
 	return s.storeImported(ctx, wsID, folderID, userID, n, st)
+}
+
+var noteExts = map[string]bool{".md": true, ".markdown": true, ".html": true, ".htm": true, ".txt": true, ".enex": true}
+
+const maxArchive = 2 << 30 // uncompressed bytes per zip
+
+// importZip imports an archive of notes (e.g. an Obsidian or Notion export) into a new folder,
+// mirroring its directories. Images and files the notes reference are stored as attachments.
+func (s *server) importZip(ctx context.Context, wsID int64, folderID *int64, userID int64, name string, f io.ReaderAt, size int64, st *importStats) error {
+	zr, err := zip.NewReader(f, size)
+	if err != nil {
+		return err
+	}
+	byPath := map[string]*zip.File{}
+	byName := map[string][]string{} // base name -> paths, for Obsidian-style links by name
+	var total uint64
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() || strings.HasPrefix(zf.Name, "__MACOSX/") || strings.HasPrefix(path.Base(zf.Name), ".") {
+			continue
+		}
+		if total += zf.UncompressedSize64; total > maxArchive {
+			return fmt.Errorf("archive is larger than 2 GB uncompressed")
+		}
+		byPath[zf.Name] = zf
+		byName[path.Base(zf.Name)] = append(byName[path.Base(zf.Name)], zf.Name)
+	}
+	// Exports often wrap everything in one directory; the import folder already plays that role.
+	strip := ""
+	for p := range byPath {
+		top, _, nested := strings.Cut(p, "/")
+		if !nested || (strip != "" && strip != top+"/") {
+			strip = ""
+			break
+		}
+		strip = top + "/"
+	}
+	root, err := s.newFolder(ctx, wsID, folderID, name)
+	if err != nil {
+		return err
+	}
+	folders := map[string]int64{".": root}
+	var folderFor func(dir string) (int64, error)
+	folderFor = func(dir string) (int64, error) {
+		if id, ok := folders[dir]; ok {
+			return id, nil
+		}
+		parent, err := folderFor(path.Dir(dir))
+		if err != nil {
+			return 0, err
+		}
+		id, err := s.newFolder(ctx, wsID, &parent, path.Base(dir))
+		folders[dir] = id
+		return id, err
+	}
+	for _, p := range slices.Sorted(maps.Keys(byPath)) {
+		ext := strings.ToLower(path.Ext(p))
+		if !noteExts[ext] {
+			continue // an asset; stored when a note references it
+		}
+		rel := strings.TrimPrefix(p, strip)
+		dirID, err := folderFor(path.Dir(rel))
+		if err != nil {
+			return err
+		}
+		if err := s.importZipEntry(ctx, wsID, &dirID, userID, byPath, byName, p, st); err != nil {
+			st.Errors = append(st.Errors, rel+": "+err.Error())
+		}
+	}
+	return nil
+}
+
+func (s *server) importZipEntry(ctx context.Context, wsID int64, folderID *int64, userID int64,
+	byPath map[string]*zip.File, byName map[string][]string, p string, st *importStats) error {
+	rc, err := byPath[p].Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	ext := strings.ToLower(path.Ext(p))
+	name := strings.TrimSuffix(path.Base(p), path.Ext(p))
+	if ext == ".enex" {
+		return s.importENEX(ctx, wsID, folderID, userID, name, rc, st)
+	}
+	src, err := io.ReadAll(rc)
+	if err != nil {
+		return err
+	}
+	files := func(ref string) (resource, bool) {
+		target := resolveRef(path.Dir(p), ref)
+		if byPath[target] == nil && len(byName[path.Base(target)]) == 1 {
+			target = byName[path.Base(target)][0]
+		}
+		zf := byPath[target]
+		if zf == nil || noteExts[strings.ToLower(path.Ext(target))] || zf.UncompressedSize64 > maxUpload {
+			return resource{}, false
+		}
+		r, err := zf.Open()
+		if err != nil {
+			return resource{}, false
+		}
+		defer r.Close()
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return resource{}, false
+		}
+		return resource{name: path.Base(target), mime: mimeOf(target, data), data: data}, true
+	}
+	return s.importDoc(ctx, wsID, folderID, userID, ext, name, src, files, st)
+}
+
+// resolveRef turns a relative URL found in a note at dir into an archive path.
+func resolveRef(dir, ref string) string {
+	ref, _, _ = strings.Cut(ref, "#")
+	ref, _, _ = strings.Cut(ref, "?")
+	if unescaped, err := url.PathUnescape(ref); err == nil {
+		ref = unescaped
+	}
+	return path.Join(dir, ref)
+}
+
+func isRelative(ref string) bool {
+	u, err := url.Parse(ref)
+	return err == nil && u.Scheme == "" && u.Host == "" && !strings.HasPrefix(ref, "/") && !strings.HasPrefix(ref, "#")
+}
+
+func mimeOf(name string, data []byte) string {
+	if t := mime.TypeByExtension(path.Ext(name)); t != "" {
+		return t
+	}
+	return http.DetectContentType(data)
+}
+
+// dataURI decodes an inline base64 file such as data:image/png;base64,....
+func dataURI(ref string) (resource, bool) {
+	rest, ok := strings.CutPrefix(ref, "data:")
+	if !ok {
+		return resource{}, false
+	}
+	meta, payload, ok := strings.Cut(rest, ",")
+	mimeType, isBase64 := strings.CutSuffix(meta, ";base64")
+	if !ok || !isBase64 {
+		return resource{}, false
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil || len(data) > maxUpload {
+		return resource{}, false
+	}
+	name := "image"
+	if exts, _ := mime.ExtensionsByType(mimeType); len(exts) > 0 {
+		name += exts[0]
+	}
+	return resource{name: name, mime: mimeType, data: data}, true
 }

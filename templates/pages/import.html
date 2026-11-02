@@ -5,7 +5,8 @@
     <div class="mx-auto max-w-xl px-6 py-8">
       <h1 class="mb-1 text-2xl font-semibold">Import notes</h1>
       <p class="mb-6 text-sm text-stone-600">
-        Evernote exports (.enex), Markdown (.md), HTML and text files. Each .enex file becomes a folder.
+        Evernote exports (.enex), Markdown (.md), HTML and text files, or a .zip of them (e.g. an
+        Obsidian or Notion export) with their images. Each .enex and .zip file becomes a folder.
       </p>
 
       {{with .Stats}}
@@ -19,7 +20,7 @@
 
       <form method="post" action="/w/{{.Workspace.ID}}/import" enctype="multipart/form-data" hx-boost="false" class="space-y-4 text-sm">
         <label class="block">Files
-          <input name="files" type="file" multiple required accept=".enex,.md,.markdown,.html,.htm,.txt"
+          <input name="files" type="file" multiple required accept=".enex,.md,.markdown,.html,.htm,.txt,.zip"
             class="mt-1 block w-full rounded border border-stone-300 p-2">
         </label>
         <label class="block">Into
