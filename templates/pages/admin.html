@@ -6,12 +6,13 @@
     class="w-72 rounded border border-stone-300 px-3 py-2">
   <button class="rounded bg-stone-900 px-4 py-2 text-white hover:bg-stone-700">Send invite</button>
 </form>
-{{with .Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
-{{with .Notice}}<p class="mb-4 rounded bg-green-50 px-3 py-2 text-sm text-green-700">{{.}}</p>{{end}}
+{{with .Msg.Error}}<p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{.}}</p>{{end}}
+{{with .Msg.Notice}}<p class="mb-4 rounded bg-green-50 px-3 py-2 text-sm text-green-700">{{.}}</p>{{end}}
+{{with .Msg.Link}}<input readonly value="{{.}}" onclick="this.select()" class="mb-4 w-full rounded border border-stone-300 bg-white px-3 py-2 font-mono text-xs">{{end}}
 
 <table class="w-full overflow-hidden rounded-lg border border-stone-200 bg-white text-sm">
   <thead class="bg-stone-100 text-left text-stone-600">
-    <tr><th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="px-4 py-2">Role</th><th class="px-4 py-2">Joined</th></tr>
+    <tr><th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="px-4 py-2">Role</th><th class="px-4 py-2">Joined</th><th></th></tr>
   </thead>
   <tbody>
     {{range .Users}}
@@ -20,6 +21,11 @@
       <td class="px-4 py-2">{{.Email}}</td>
       <td class="px-4 py-2">{{if .IsAdmin}}Admin{{else}}User{{end}}</td>
       <td class="px-4 py-2">{{.CreatedAt.Format "2006-01-02"}}</td>
+      <td class="px-4 py-2 text-right">
+        <form method="post" action="/admin/users/{{.ID}}/reset" hx-confirm="Send {{.Name}} a password reset link?">
+          <button class="text-stone-600 hover:text-stone-900">Reset password</button>
+        </form>
+      </td>
     </tr>
     {{end}}
   </tbody>

@@ -28,6 +28,7 @@ type server struct {
 
 	loginAccount *limiter // failed logins per email and address
 	loginIP      *limiter // failed logins per address
+	resetIP      *limiter // password reset requests per address
 	trustProxy   bool
 }
 
@@ -84,6 +85,7 @@ func serve(db *pgxpool.Pool) error {
 		assets:       assets,
 		loginAccount: newLimiter(5, 15*time.Minute),
 		loginIP:      newLimiter(30, 15*time.Minute),
+		resetIP:      newLimiter(5, time.Hour),
 		trustProxy:   os.Getenv("TRUST_PROXY") == "true",
 		db:           db,
 		baseURL:      baseURL,
@@ -104,6 +106,10 @@ func serve(db *pgxpool.Pool) error {
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("POST /login", s.login)
 	mux.Handle("POST /logout", s.requireUser(http.HandlerFunc(s.logout)))
+	mux.HandleFunc("GET /forgot", s.forgotPage)
+	mux.HandleFunc("POST /forgot", s.forgot)
+	mux.HandleFunc("GET /reset/{token}", s.resetPage)
+	mux.HandleFunc("POST /reset/{token}", s.resetPassword)
 	mux.HandleFunc("GET /invite/{token}", s.invitePage)
 	mux.HandleFunc("POST /invite/{token}", s.acceptInvite)
 	auth := func(h http.HandlerFunc) http.Handler { return s.requireUser(h) }
@@ -136,6 +142,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /notes/{id}/tags/{tag}/delete", auth(s.removeTag))
 	mux.Handle("GET /admin/users", s.requireAdmin(http.HandlerFunc(s.adminUsers)))
 	mux.Handle("POST /admin/invites", s.requireAdmin(http.HandlerFunc(s.createInvite)))
+	mux.Handle("POST /admin/users/{id}/reset", s.requireAdmin(http.HandlerFunc(s.adminReset)))
 
 	addr := env("ADDR", ":8080")
 	log.Printf("listening on %s (%s)", addr, baseURL)

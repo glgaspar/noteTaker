@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/mail"
-	"net/smtp"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -14,27 +13,26 @@ import (
 
 const inviteTTL = 7 * 24 * time.Hour
 
-type smtpConfig struct {
-	host, port, user, pass, from string
+// adminMsg is the feedback shown on the admin page. Link is shown when SMTP is not
+// configured, so the admin can pass it on by hand.
+type adminMsg struct {
+	Error, Notice, Link string
 }
 
-// sendInvite emails the invite link, or logs it when SMTP is not configured.
-func (s *server) sendInvite(to, link string) error {
-	if s.smtp.host == "" {
-		log.Printf("SMTP not configured; invite link for %s: %s", to, link)
-		return nil
+// sendLink emails a link and returns the feedback for the admin page.
+func (s *server) sendLink(to, subject, body, link, notice string) adminMsg {
+	if err := s.sendMail(to, subject, fmt.Sprintf(body, link)); err != nil {
+		log.Printf("send mail to %s: %v", to, err)
+		return adminMsg{Error: "The email could not be sent. Share this link instead:", Link: link}
 	}
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: You're invited to NoteTaker\r\n\r\n"+
-		"You have been invited to NoteTaker. Create your account here:\r\n\r\n%s\r\n\r\n"+
-		"This link expires in 7 days.\r\n", s.smtp.from, to, link)
-	var auth smtp.Auth
-	if s.smtp.user != "" {
-		auth = smtp.PlainAuth("", s.smtp.user, s.smtp.pass, s.smtp.host)
+	if !s.mailConfigured() {
+		return adminMsg{Notice: "Email is not configured. Share this link with " + to + ":", Link: link}
 	}
-	return smtp.SendMail(s.smtp.host+":"+s.smtp.port, auth, s.smtp.from, []string{to}, []byte(msg))
+	return adminMsg{Notice: notice}
 }
 
 type userRow struct {
+	ID        int64
 	Email     string
 	Name      string
 	IsAdmin   bool
@@ -47,20 +45,20 @@ type inviteRow struct {
 }
 
 func (s *server) adminUsers(w http.ResponseWriter, r *http.Request) {
-	s.renderAdmin(w, r, "", "")
+	s.renderAdmin(w, r, adminMsg{})
 }
 
-func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, errMsg, notice string) {
+func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMsg) {
 	ctx := r.Context()
 	var users []userRow
-	rows, err := s.db.Query(ctx, `SELECT email, name, is_admin, created_at FROM users ORDER BY created_at`)
+	rows, err := s.db.Query(ctx, `SELECT id, email, name, is_admin, created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	for rows.Next() {
 		var u userRow
-		if err := rows.Scan(&u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt); err != nil {
 			serverError(w, err)
 			return
 		}
@@ -81,7 +79,7 @@ func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, errMsg, not
 		invites = append(invites, i)
 	}
 	s.render(w, "admin.html", map[string]any{
-		"User": currentUser(r), "Users": users, "Invites": invites, "Error": errMsg, "Notice": notice,
+		"User": currentUser(r), "Users": users, "Invites": invites, "Msg": msg,
 	})
 }
 
@@ -89,7 +87,7 @@ func (s *server) createInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	email := normalizeEmail(r.FormValue("email"))
 	if addr, err := mail.ParseAddress(email); err != nil || addr.Address != email {
-		s.renderAdmin(w, r, "Enter a valid email address.", "")
+		s.renderAdmin(w, r, adminMsg{Error: "Enter a valid email address."})
 		return
 	}
 	var exists bool
@@ -98,7 +96,7 @@ func (s *server) createInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists {
-		s.renderAdmin(w, r, "A user with that email already exists.", "")
+		s.renderAdmin(w, r, adminMsg{Error: "A user with that email already exists."})
 		return
 	}
 	token := rand.Text()
@@ -110,12 +108,9 @@ func (s *server) createInvite(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	if err := s.sendInvite(email, s.baseURL+"/invite/"+token); err != nil {
-		log.Printf("send invite to %s: %v", email, err)
-		s.renderAdmin(w, r, "Invite saved, but the email could not be sent.", "")
-		return
-	}
-	s.renderAdmin(w, r, "", "Invite sent to "+email+".")
+	s.renderAdmin(w, r, s.sendLink(email, "You're invited to NoteTaker",
+		"You have been invited to NoteTaker. Create your account here:\n\n%s\n\nThis link expires in 7 days.\n",
+		s.baseURL+"/invite/"+token, "Invite sent to "+email+"."))
 }
 
 func (s *server) invitePage(w http.ResponseWriter, r *http.Request) {
