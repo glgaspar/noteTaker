@@ -29,16 +29,19 @@ function render(tree, expanded) {
 export function initTree(root) {
   const tree = root.querySelector?.("#folder-tree");
   if (!tree) return;
+  // Folders the server opened because the current folder is inside them stay open, so
+  // leaving the folder (All notes, a tag, ...) does not collapse the tree.
+  const expanded = load();
+  const before = expanded.size;
+  for (const row of tree.querySelectorAll("li[data-parent]")) {
+    if (row.querySelector("[data-toggle] svg.rotate-90")) expanded.add(row.dataset.folder);
+  }
+  if (expanded.size !== before) save(expanded);
   tree.addEventListener("click", (e) => {
     const toggle = e.target.closest("[data-toggle]");
     if (!toggle) return;
-    const li = toggle.closest("li");
-    // what the server showed open (current folder's ancestors) counts as expanded
-    const expanded = load();
-    for (const row of tree.querySelectorAll("li[data-parent]")) {
-      if (row.querySelector("[data-toggle] svg.rotate-90")) expanded.add(row.dataset.folder);
-    }
-    expanded.has(li.dataset.folder) ? expanded.delete(li.dataset.folder) : expanded.add(li.dataset.folder);
+    const id = toggle.closest("li").dataset.folder;
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
     save(expanded);
     render(tree, expanded);
   });
