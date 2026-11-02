@@ -25,11 +25,11 @@
     </div>
     <ul id="folder-tree" class="space-y-px">
       {{range .Folders}}
-      <li data-folder="{{.ID}}" data-depth="{{.Depth}}" {{if .HasChildren}}data-parent{{end}} {{if eq .ID $.FolderID}}data-current{{end}}>
+      <li data-folder="{{.ID}}" data-depth="{{.Depth}}" {{if .HasChildren}}data-parent{{end}} {{if eq .ID $.FolderID}}data-current{{end}} {{if .Hidden}}hidden{{end}}>
         <div class="nav-item group relative h-7 gap-1 pr-1 {{if eq .ID $.FolderID}}is-current{{end}}" style="padding-left: calc({{.Depth}} * 12px + 2px)">
           {{if .HasChildren}}
           <button type="button" data-toggle class="grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-ink" title="Expand">
-            {{icon "chevron-right" "size-3.5 transition-transform"}}
+            {{if .Open}}{{icon "chevron-right" "size-3.5 rotate-90 transition-transform"}}{{else}}{{icon "chevron-right" "size-3.5 transition-transform"}}{{end}}
           </button>
           {{else}}<span class="size-5 shrink-0"></span>{{end}}
           <a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="flex min-w-0 flex-1 items-center gap-2 self-stretch">

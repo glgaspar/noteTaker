@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,40 @@ type folder struct {
 	Depth    int
 	// HasChildren: visible subfolders follow it in the tree
 	HasChildren bool
+	// Open and Hidden: the tree's collapsed state, see markCollapsed
+	Open, Hidden bool
+}
+
+// markCollapsed sets which folders are open and which rows are hidden: open folders are the
+// ones the browser keeps expanded (the "expanded" cookie, see tree.js) and the ancestors of
+// the current folder. Rendering this on the server keeps the tree from jumping on load.
+func markCollapsed(r *http.Request, folders []folder, current int64) {
+	expanded := map[int64]bool{}
+	if c, err := r.Cookie("expanded"); err == nil {
+		for _, id := range strings.Split(c.Value, ".") {
+			if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+				expanded[n] = true
+			}
+		}
+	}
+	for _, f := range folderPath(folders, current) {
+		if f.ID != current {
+			expanded[f.ID] = true
+		}
+	}
+	hideBelow := -1
+	for i := range folders {
+		f := &folders[i]
+		if hideBelow >= 0 && f.Depth > hideBelow {
+			f.Hidden = true
+			continue
+		}
+		hideBelow = -1
+		f.Open = expanded[f.ID]
+		if f.HasChildren && !f.Open {
+			hideBelow = f.Depth
+		}
+	}
 }
 
 // folderPath returns the visible folders from the top of the tree down to id.

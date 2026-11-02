@@ -1,21 +1,14 @@
 // Collapsible folder tree. The server renders folders as a flat list in tree order with
-// data-depth; collapsing a folder hides the rows below it with a greater depth. Expanded
-// folders are remembered per browser; the current folder's ancestors always open.
-
-const KEY = "expanded-folders";
+// data-depth, already collapsed according to the "expanded" cookie (ids of open folders),
+// so toggling only has to update the cookie and hide or show the rows below a folder.
 
 function load() {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(KEY) || "[]"));
-  } catch {
-    return new Set();
-  }
+  const value = document.cookie.split("; ").find((c) => c.startsWith("expanded="));
+  return new Set(value ? value.slice(9).split(".").filter(Boolean) : []);
 }
 
 function save(set) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify([...set]));
-  } catch {}
+  document.cookie = `expanded=${[...set].join(".")}; path=/; max-age=31536000; samesite=lax`;
 }
 
 function render(tree, expanded) {
@@ -29,30 +22,23 @@ function render(tree, expanded) {
     li.hidden = false;
     const open = expanded.has(li.dataset.folder);
     hideBelow = li.hasAttribute("data-parent") && !open ? depth : Infinity;
-    const chevron = li.querySelector("[data-toggle] svg");
-    if (chevron) chevron.style.transform = open ? "rotate(90deg)" : "";
+    li.querySelector("[data-toggle] svg")?.classList.toggle("rotate-90", open);
   }
 }
 
 export function initTree(root) {
   const tree = root.querySelector?.("#folder-tree");
   if (!tree) return;
-  const expanded = load();
-  // open the ancestors of the current folder
-  const rows = [...tree.querySelectorAll("li[data-folder]")];
-  const current = rows.findIndex((li) => li.hasAttribute("data-current"));
-  for (let i = current - 1, depth = Number(rows[current]?.dataset.depth); i >= 0 && depth > 0; i--) {
-    if (Number(rows[i].dataset.depth) < depth) {
-      expanded.add(rows[i].dataset.folder);
-      depth = Number(rows[i].dataset.depth);
-    }
-  }
-  render(tree, expanded);
   tree.addEventListener("click", (e) => {
     const toggle = e.target.closest("[data-toggle]");
     if (!toggle) return;
-    const id = toggle.closest("li").dataset.folder;
-    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    const li = toggle.closest("li");
+    // what the server showed open (current folder's ancestors) counts as expanded
+    const expanded = load();
+    for (const row of tree.querySelectorAll("li[data-parent]")) {
+      if (row.querySelector("[data-toggle] svg.rotate-90")) expanded.add(row.dataset.folder);
+    }
+    expanded.has(li.dataset.folder) ? expanded.delete(li.dataset.folder) : expanded.add(li.dataset.folder);
     save(expanded);
     render(tree, expanded);
   });

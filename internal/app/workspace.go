@@ -202,6 +202,7 @@ func (s *Server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any
 		s.serverError(w, r, err)
 		return nil, false
 	}
+	markCollapsed(r, folders, orZero(formID(r, "folder")))
 	return map[string]any{
 		"User": user, "Workspace": ws, "Workspaces": workspaces, "Folders": folders, "Tags": tags,
 		"FolderID": orZero(formID(r, "folder")), "TagID": orZero(formID(r, "tag")), "Loc": userLoc(r),

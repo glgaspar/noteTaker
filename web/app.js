@@ -34,6 +34,30 @@ document.addEventListener("htmx:beforeSwap", (e) => {
     editor = null;
   }
 });
+// Keep the sidebar's scroll position across navigations, and the note list's while staying
+// in the same folder or tag (e.g. moving between notes).
+const listKey = (url) => {
+  const q = new URL(url, location.href).searchParams;
+  return `${new URL(url, location.href).pathname}?${q.get("folder")}&${q.get("tag")}`;
+};
+let scrolls = null;
+document.addEventListener("htmx:beforeSwap", (e) => {
+  if (!e.detail.boosted) return;
+  scrolls = {
+    sidebar: document.querySelector("#sidebar .overflow-y-auto")?.scrollTop,
+    list: document.querySelector("#list-pane ul")?.scrollTop,
+    key: listKey(location.href),
+  };
+});
+document.addEventListener("htmx:afterSwap", (e) => {
+  if (!scrolls || !e.detail.boosted) return;
+  const sidebar = document.querySelector("#sidebar .overflow-y-auto");
+  if (sidebar) sidebar.scrollTop = scrolls.sidebar || 0;
+  const list = document.querySelector("#list-pane ul");
+  if (list && listKey(e.detail.pathInfo?.finalRequestPath || location.href) === scrolls.key) list.scrollTop = scrolls.list || 0;
+  scrolls = null;
+});
+
 // Error pages (404, 403, ...) replace the page on navigation; htmx skips error responses by
 // default. Partial updates keep ignoring them.
 document.addEventListener("htmx:beforeSwap", (e) => {
