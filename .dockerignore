@@ -1,0 +1,5 @@
+.git
+node_modules
+e2e
+bin
+static/dist

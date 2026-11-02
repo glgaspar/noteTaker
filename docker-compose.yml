@@ -26,6 +26,30 @@ services:
     volumes:
       - files:/data
 
+  # The app itself, for running everything in containers: docker compose --profile app up -d
+  app:
+    build: .
+    profiles: [app]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://notetaker:notetaker@db:5432/notetaker?sslmode=disable
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      S3_ENDPOINT: files:9000
+      S3_ACCESS_KEY: notetaker
+      S3_SECRET_KEY: notetaker-secret
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-notetaker@localhost}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      files:
+        condition: service_started
+
 volumes:
   pgdata:
   files:
