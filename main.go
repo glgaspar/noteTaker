@@ -25,6 +25,10 @@ type server struct {
 	hub     hub
 	files   *storage // nil when S3 is not configured
 	assets  map[string]*asset
+
+	loginAccount *limiter // failed logins per email and address
+	loginIP      *limiter // failed logins per address
+	trustProxy   bool
 }
 
 func env(key, fallback string) string {
@@ -76,11 +80,14 @@ func serve(db *pgxpool.Pool) error {
 		return err
 	}
 	s := &server{
-		files:   files,
-		assets:  assets,
-		db:      db,
-		baseURL: baseURL,
-		secure:  strings.HasPrefix(baseURL, "https://"),
+		files:        files,
+		assets:       assets,
+		loginAccount: newLimiter(5, 15*time.Minute),
+		loginIP:      newLimiter(30, 15*time.Minute),
+		trustProxy:   os.Getenv("TRUST_PROXY") == "true",
+		db:           db,
+		baseURL:      baseURL,
+		secure:       strings.HasPrefix(baseURL, "https://"),
 		smtp: smtpConfig{
 			host: os.Getenv("SMTP_HOST"),
 			port: env("SMTP_PORT", "587"),

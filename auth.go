@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -101,6 +102,24 @@ func (s *server) loginPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	email := normalizeEmail(r.FormValue("email"))
+	ip := s.clientIP(r)
+	account := email + "|" + ip // per email and address, so others cannot lock a user out
+	accountBlocked, until := s.loginAccount.blocked(account)
+	ipBlocked, ipUntil := s.loginIP.blocked(ip)
+	if accountBlocked || ipBlocked {
+		var wait time.Duration
+		if accountBlocked {
+			wait = time.Until(until)
+		}
+		if ipBlocked {
+			wait = max(wait, time.Until(ipUntil))
+		}
+		minutes := max(int(wait.Round(time.Minute).Minutes()), 1)
+		s.render(w, "login.html", map[string]any{
+			"Error": fmt.Sprintf("Too many failed attempts. Try again in %d minutes.", minutes), "Email": email,
+		})
+		return
+	}
 	var id int64
 	var hash []byte
 	err := s.db.QueryRow(r.Context(), `SELECT id, password_hash FROM users WHERE email = $1`, email).Scan(&id, &hash)
@@ -108,9 +127,12 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		hash = dummyHash
 	}
 	if bcrypt.CompareHashAndPassword(hash, []byte(r.FormValue("password"))) != nil || err != nil {
+		s.loginAccount.fail(account)
+		s.loginIP.fail(ip)
 		s.render(w, "login.html", map[string]any{"Error": "Invalid email or password.", "Email": email})
 		return
 	}
+	s.loginAccount.clear(account)
 	if err := s.startSession(r.Context(), w, id); err != nil {
 		serverError(w, err)
 		return
