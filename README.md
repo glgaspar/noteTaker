@@ -61,6 +61,15 @@ make test   # Go integration tests; recreate the notetaker_test database, need `
 make e2e    # browser checks against a running server (E2E_URL, E2E_ADMIN_EMAIL/PASSWORD, CHROME)
 ```
 
+## Export
+
+Notes export as Markdown (with front matter and an `attachments/` folder, which imports back
+into NoteTaker or opens in Obsidian) or as HTML, from the note, folder, workspace and user menus.
+Single notes download right away; larger exports run in the background (two at a time, one per
+user) and stay downloadable for 24 hours. Their zips are written to the system temp directory.
+Exports only contain notes the person can see. "Print or save as PDF" in a note's menu prints
+just the note.
+
 ## Backups
 
 Back up the database first, then the files: a file uploaded in between is merely extra (the sweep

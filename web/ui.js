@@ -131,6 +131,19 @@ document.addEventListener("click", (e) => {
   });
 });
 
+// [data-export-scope] buttons open the export dialog for a folder, workspace or everything.
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-export-scope]");
+  if (!el) return;
+  const dialog = document.getElementById("export-dialog");
+  const form = dialog.querySelector("form");
+  form.elements.scope.value = el.dataset.exportScope;
+  form.elements.id.value = el.dataset.exportId || "";
+  dialog.querySelector("[data-export-name]").textContent = el.dataset.exportName || "";
+  closeMenus();
+  dialog.showModal();
+});
+
 // confirmDialog resolves to true when the user confirms.
 export function confirmDialog(question, confirmLabel = "Delete") {
   const dialog = document.getElementById("confirm-dialog");

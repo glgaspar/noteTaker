@@ -294,3 +294,45 @@
 .prose :where(code):not(:where(pre *))::after {
   content: none;
 }
+
+/* ---- print / save as PDF: just the note ---- */
+
+@media print {
+  #sidebar,
+  [data-drawer-close],
+  #list-pane,
+  #note-pane > header,
+  #toolbar,
+  #note-tags form,
+  #note-tags button,
+  dialog,
+  [popover],
+  .collaboration-carets__caret {
+    display: none !important;
+  }
+  body,
+  body > div,
+  #note-pane,
+  #note-pane > div {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dark {
+    color-scheme: light;
+    --canvas: #ffffff;
+    --raised: #ffffff;
+    --line: #ebe9e4;
+    --ink: #2b2925;
+    --muted: #73706a;
+    --faint: #a8a49c;
+    --hover: rgb(55 53 47 / 0.06);
+    --accent: #5b5bd6;
+  }
+  .prose pre {
+    break-inside: avoid;
+  }
+  .tiptap p.is-editor-empty::before {
+    content: none;
+  }
+}

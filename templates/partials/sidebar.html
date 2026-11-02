@@ -35,11 +35,9 @@
           <a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="flex min-w-0 flex-1 items-center gap-2 self-stretch">
             {{icon "folder" "text-faint"}}<span class="truncate">{{.Name}}</span>
           </a>
-          {{if or .CanEdit .Manage $.Workspace.CanEdit}}
           <button popovertarget="folder-menu" class="btn-icon size-6 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Folder actions"
             data-menu-id="{{.ID}}" data-menu-name="{{.Name}}"
             {{if .CanEdit}}data-menu-edit{{end}} {{if .Manage}}data-menu-manage{{end}} {{if $.Workspace.CanEdit}}data-menu-share{{end}}>{{icon "ellipsis"}}</button>
-          {{end}}
         </div>
       </li>
       {{else}}
@@ -98,6 +96,7 @@
     <div class="menu-sep"></div>
     <a href="/w/{{.Workspace.ID}}/members" class="menu-item">{{icon "users"}} Members</a>
     {{end}}
+    <button class="menu-item" data-export-scope="workspace" data-export-id="{{.Workspace.ID}}" data-export-name="“{{.Workspace.Name}}”">{{icon "inbox"}} Export workspace</button>
     {{if .Workspace.CanEdit}}
     <button class="menu-item" data-prompt-title="Rename workspace" data-prompt-action="/w/{{.Workspace.ID}}/rename" data-prompt-value="{{.Workspace.Name}}">{{icon "pencil"}} Rename</button>
     {{end}}
@@ -113,6 +112,7 @@
       data-prompt-title="New subfolder" data-prompt-action="/w/{{.Workspace.ID}}/folders" data-prompt-field-parent_id="{id}" data-prompt-submit="Create" data-prompt-placeholder="Folder name">{{icon "folder-plus"}} New subfolder</button>
     <a class="menu-item" data-requires="edit" data-fill="href" href="/w/{{.Workspace.ID}}/import?folder={id}">{{icon "upload"}} Import here</a>
     <a class="menu-item" data-requires="share" data-fill="href" href="/folders/{id}/share">{{icon "share-2"}} Share</a>
+    <button class="menu-item" data-fill="data-export-id,data-export-name" data-export-scope="folder" data-export-id="{id}" data-export-name="“{name}”">{{icon "inbox"}} Export folder</button>
     <div class="menu-sep" data-requires="manage"></div>
     <button class="menu-item" data-requires="manage" data-fill="data-prompt-action,data-prompt-value"
       data-prompt-title="Rename folder" data-prompt-action="/folders/{id}/rename" data-prompt-value="{name}">{{icon "pencil"}} Rename</button>

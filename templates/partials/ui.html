@@ -38,6 +38,7 @@
   </div>
   <div class="menu-sep"></div>
   {{if .User.IsAdmin}}<a href="/admin/users" class="menu-item">{{icon "shield"}} Manage users</a>{{end}}
+  <button class="menu-item" data-export-scope="all" data-export-name="everything you can access">{{icon "inbox"}} Export everything</button>
   <form method="post" action="/logout"><button class="menu-item">{{icon "log-out"}} Log out</button></form>
 </div>
 {{end}}
@@ -53,6 +54,27 @@
     <div class="mt-5 flex justify-end gap-2">
       <button type="button" data-close class="btn-ghost">Cancel</button>
       <button data-submit class="btn-primary">Save</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="export-dialog" class="dialog">
+  <form method="post" action="/exports" class="p-5">
+    <h2 class="text-[15px] font-semibold">Export <span data-export-name></span></h2>
+    <p class="mt-1 text-[13px] text-muted">You get a zip with a file per note, in folders, with their images and attachments.</p>
+    <input type="hidden" name="scope"><input type="hidden" name="id">
+    <div class="mt-4 grid gap-2">
+      <label class="flex cursor-pointer gap-3 rounded-lg border border-line p-3 has-checked:border-accent has-checked:bg-accent-soft/40">
+        <input type="radio" name="format" value="md" checked class="mt-0.5 accent-[var(--accent)]">
+        <span><span class="block font-medium">Markdown</span><span class="text-[13px] text-muted">For Obsidian, editors and other apps. Can be imported back.</span></span>
+      </label>
+      <label class="flex cursor-pointer gap-3 rounded-lg border border-line p-3 has-checked:border-accent has-checked:bg-accent-soft/40">
+        <input type="radio" name="format" value="html" class="mt-0.5 accent-[var(--accent)]">
+        <span><span class="block font-medium">HTML</span><span class="text-[13px] text-muted">Readable in any browser, with a table of contents.</span></span>
+      </label>
+    </div>
+    <div class="mt-5 flex justify-end gap-2">
+      <button type="button" data-close class="btn-ghost">Cancel</button>
+      <button class="btn-primary">Export</button>
     </div>
   </form>
 </dialog>

@@ -15,15 +15,16 @@ import (
 
 // Server serves the app; build it with New.
 type Server struct {
-	db         *pgxpool.Pool
-	files      *storage.Storage // nil when attachment storage is not configured
-	baseURL    string
-	secure     bool
-	smtp       SMTPConfig
-	trustProxy bool
-	tmpl       map[string]*template.Template
-	hub        collab.Hub
-	assets     map[string]*asset
+	db          *pgxpool.Pool
+	files       *storage.Storage // nil when attachment storage is not configured
+	baseURL     string
+	secure      bool
+	smtp        SMTPConfig
+	trustProxy  bool
+	tmpl        map[string]*template.Template
+	hub         collab.Hub
+	assets      map[string]*asset
+	exportSlots chan struct{} // limits exports running at once
 
 	loginAccount *limiter // failed logins per email and address
 	loginIP      *limiter // failed logins per address
@@ -54,6 +55,7 @@ func New(cfg Config) (*Server, error) {
 		loginAccount: newLimiter(5, 15*time.Minute),
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
+		exportSlots:  make(chan struct{}, exportsAtOnce),
 	}
 	s.tmpl = parseTemplates(template.FuncMap{
 		"asset": s.assetURL, "local": local, "icon": s.icon, "initials": initials, "color": avatarColor, "ago": ago,
@@ -64,6 +66,8 @@ func New(cfg Config) (*Server, error) {
 // StartJobs marks imports cut short by a restart and starts sweeping orphaned files.
 func (s *Server) StartJobs() {
 	recoverImports(context.Background(), s.db)
+	recoverExports(context.Background(), s)
+	go cleanExportsEvery(s, time.Hour)
 	if s.files != nil {
 		go sweepFilesEvery(s.db, s.files, 6*time.Hour)
 	}
@@ -93,6 +97,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /w/{id}/import", auth(s.importNotes))
 	mux.Handle("GET /w/{id}/imports/{job}", auth(s.importJobPage))
 	mux.Handle("GET /files/{id}", auth(s.serveFile))
+	mux.Handle("GET /notes/{id}/export", auth(s.exportNoteFile))
+	mux.Handle("POST /exports", auth(s.startExport))
+	mux.Handle("GET /exports/{id}", auth(s.exportJobPage))
+	mux.Handle("GET /exports/{id}/download", auth(s.downloadExport))
 	mux.Handle("POST /notes/{id}/attachments", auth(s.uploadFile))
 	mux.Handle("GET /w/{id}/members", auth(s.workspaceMembers))
 	mux.Handle("POST /w/{id}/members", auth(s.addWorkspaceMember))
