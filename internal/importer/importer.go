@@ -135,6 +135,9 @@ func ParseENEX(r io.Reader, fn func(Note) error) error {
 			Created: enexTime(en.Created), Updated: enexTime(en.Updated), Resources: map[string]Resource{},
 		}
 		for _, res := range en.Resources {
+			if len(res.Data) > MaxFile*4/3+MaxFile/50 { // base64 of a file over MaxFile, with line breaks
+				continue
+			}
 			data, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(res.Data), ""))
 			if err != nil {
 				continue

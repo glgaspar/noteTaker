@@ -25,6 +25,7 @@ type Server struct {
 	hub         collab.Hub
 	assets      map[string]*asset
 	exportSlots chan struct{} // limits exports running at once
+	importSlots chan struct{} // limits imports running at once
 
 	loginAccount *limiter // failed logins per email and address
 	loginIP      *limiter // failed logins per address
@@ -56,6 +57,7 @@ func New(cfg Config) (*Server, error) {
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
 		exportSlots:  make(chan struct{}, exportsAtOnce),
+		importSlots:  make(chan struct{}, importsAtOnce),
 	}
 	s.tmpl = parseTemplates(template.FuncMap{
 		"asset": s.assetURL, "local": local, "icon": s.icon, "initials": initials, "color": avatarColor, "ago": ago,

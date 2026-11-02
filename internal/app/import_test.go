@@ -158,3 +158,33 @@ func TestStaticAssets(t *testing.T) {
 		t.Errorf("unversioned asset: %q %q", res.header.Get("Cache-Control"), res.header.Get("Content-Encoding"))
 	}
 }
+
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func TestImportLimits(t *testing.T) {
+	if _, err := readDocument(io.LimitReader(zeros{}, maxDocument+1)); err == nil {
+		t.Error("document over the limit accepted")
+	}
+	if src, err := readDocument(strings.NewReader("# small")); err != nil || string(src) != "# small" {
+		t.Errorf("small document: %q %v", src, err)
+	}
+
+	// One import at a time per user.
+	a := newApp(t, false)
+	ann := a.user("Ann", false)
+	ws := ann.workspace("W")
+	var running int64
+	testDB.QueryRow(context.Background(), `INSERT INTO import_jobs (workspace_id, user_id) VALUES ($1, $2) RETURNING id`, ws, ann.ID).Scan(&running)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	w, _ := mw.CreateFormFile("files", "a.txt")
+	w.Write([]byte("hello"))
+	mw.Close()
+	req, _ := http.NewRequest("POST", fmt.Sprintf("%s/w/%d/import", ann.base, ws), &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if res := ann.do(req); res.location != fmt.Sprintf("/w/%d/imports/%d", ws, running) {
+		t.Errorf("second import went to %q", res.location)
+	}
+}

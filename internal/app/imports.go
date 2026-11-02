@@ -148,7 +148,17 @@ func (s *Server) importNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := currentUser(r)
-	var jobID int64
+	// One import at a time per user: a second upload shows the one in progress.
+	var jobID, runningWS int64
+	err := s.db.QueryRow(ctx, `SELECT id, workspace_id FROM import_jobs WHERE user_id = $1 AND running`, user.ID).Scan(&jobID, &runningWS)
+	if err == nil {
+		redirect(w, r, fmt.Sprintf("/w/%d/imports/%d", runningWS, jobID))
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		s.serverError(w, r, err)
+		return
+	}
 	if err := s.db.QueryRow(ctx, `INSERT INTO import_jobs (workspace_id, user_id) VALUES ($1, $2) RETURNING id`,
 		ws.ID, user.ID).Scan(&jobID); err != nil {
 		s.serverError(w, r, err)
@@ -156,7 +166,7 @@ func (s *Server) importNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	dir := filepath.Join(importDir, strconv.FormatInt(jobID, 10))
 	var names []string
-	err := os.MkdirAll(dir, 0o700)
+	err = os.MkdirAll(dir, 0o700)
 	for i, fh := range r.MultipartForm.File["files"] {
 		if err != nil {
 			break
@@ -196,6 +206,8 @@ func saveUpload(fh *multipart.FileHeader, dst string) error {
 func (s *Server) runImport(jobID, wsID int64, folderID *int64, userID int64, dir string, names []string) {
 	ctx := context.Background()
 	defer os.RemoveAll(dir)
+	s.importSlots <- struct{}{} // at most importsAtOnce imports run in parallel
+	defer func() { <-s.importSlots }()
 	var st importStats
 	save := func(running bool) {
 		stats, _ := json.Marshal(&st)
@@ -281,6 +293,20 @@ func (s *Server) importJobPage(w http.ResponseWriter, r *http.Request) {
 
 var errUnsupported = fmt.Errorf("unsupported file type")
 
+const (
+	importsAtOnce = 2        // imports running in parallel, server-wide
+	maxDocument   = 50 << 20 // largest Markdown, HTML or text file read into memory
+)
+
+// readDocument reads a document to convert, refusing very large ones.
+func readDocument(r io.Reader) ([]byte, error) {
+	src, err := io.ReadAll(io.LimitReader(r, maxDocument+1))
+	if err == nil && len(src) > maxDocument {
+		err = fmt.Errorf("larger than %d MB", maxDocument>>20)
+	}
+	return src, err
+}
+
 // upload is an uploaded file: multipart files and *os.File both qualify.
 type upload interface {
 	io.Reader
@@ -297,7 +323,7 @@ func (s *Server) importFile(ctx context.Context, wsID int64, folderID *int64, us
 	case ".enex":
 		return s.importENEX(ctx, wsID, folderID, userID, name, f, st)
 	}
-	src, err := io.ReadAll(f)
+	src, err := readDocument(f)
 	if err != nil {
 		return err
 	}
@@ -426,7 +452,7 @@ func (s *Server) importZipEntry(ctx context.Context, wsID int64, folderID *int64
 	if ext == ".enex" {
 		return s.importENEX(ctx, wsID, folderID, userID, name, rc, st)
 	}
-	src, err := io.ReadAll(rc)
+	src, err := readDocument(rc)
 	if err != nil {
 		return err
 	}
