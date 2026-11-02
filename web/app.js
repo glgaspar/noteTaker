@@ -2,6 +2,12 @@ import htmx from "htmx.org";
 import { mountEditor } from "./editor.js";
 
 window.htmx = htmx;
+
+// Tell the server our time zone, for timestamps and date filters.
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+if (tz && !document.cookie.split("; ").includes(`tz=${encodeURIComponent(tz)}`)) {
+  document.cookie = `tz=${encodeURIComponent(tz)}; path=/; max-age=31536000; samesite=lax`;
+}
 // Always fetch pages fresh on back/forward so the editor never shows a stale snapshot.
 htmx.config.historyCacheSize = 0;
 htmx.config.refreshOnHistoryMiss = true;

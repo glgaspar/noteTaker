@@ -20,7 +20,7 @@
       <td class="px-4 py-2">{{.Name}}{{if .Disabled}} (disabled){{end}}</td>
       <td class="px-4 py-2">{{.Email}}</td>
       <td class="px-4 py-2">{{if .IsAdmin}}Admin{{else}}User{{end}}</td>
-      <td class="px-4 py-2">{{.CreatedAt.Format "2006-01-02"}}</td>
+      <td class="px-4 py-2">{{(local $.Loc .CreatedAt).Format "2006-01-02"}}</td>
       <td class="space-x-3 whitespace-nowrap px-4 py-2 text-right">
         {{if .Disabled}}
         <form method="post" action="/admin/users/{{.ID}}/enable" class="inline">
@@ -46,7 +46,7 @@
 <h2 class="mb-3 mt-8 text-lg font-semibold">Pending invites</h2>
 <ul class="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white text-sm">
   {{range .Invites}}
-  <li class="flex px-4 py-2"><span>{{.Email}}</span><span class="ml-auto text-stone-500">expires {{.ExpiresAt.Format "2006-01-02"}}</span></li>
+  <li class="flex px-4 py-2"><span>{{.Email}}</span><span class="ml-auto text-stone-500">expires {{(local $.Loc .ExpiresAt).Format "2006-01-02"}}</span></li>
   {{end}}
 </ul>
 {{end}}

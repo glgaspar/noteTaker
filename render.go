@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"path"
+	"time"
+	_ "time/tzdata" // zone names work even in minimal containers
 )
 
 //go:embed templates
@@ -26,6 +29,27 @@ func parseTemplates(funcs template.FuncMap) map[string]*template.Template {
 		m[path.Base(p)] = template.Must(t.ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", p))
 	}
 	return m
+}
+
+// userLoc is the viewer's time zone, reported by the browser in the "tz" cookie (see app.js),
+// or the server's when unknown.
+func userLoc(r *http.Request) *time.Location {
+	if c, err := r.Cookie("tz"); err == nil {
+		if name, err := url.QueryUnescape(c.Value); err == nil {
+			if loc, err := time.LoadLocation(name); err == nil {
+				return loc
+			}
+		}
+	}
+	return time.Local
+}
+
+// local converts a time to a time zone for display; templates call it as (local $.Loc .T).
+func local(loc *time.Location, t time.Time) time.Time {
+	if loc == nil {
+		loc = time.Local
+	}
+	return t.In(loc)
 }
 
 func (s *server) render(w http.ResponseWriter, name string, data any) {

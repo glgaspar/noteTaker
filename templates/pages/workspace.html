@@ -18,7 +18,7 @@
           class="block px-4 py-3 hover:bg-stone-50 {{if and $.Note (eq .ID $.Note.ID)}}bg-stone-100{{end}}">
           <div class="truncate font-medium" data-note-title="{{.ID}}">{{or .Title "Untitled"}}</div>
           <div class="line-clamp-2 text-sm text-stone-500">{{.Snippet}}</div>
-          <div class="mt-1 text-xs text-stone-400">{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}</div>
+          <div class="mt-1 text-xs text-stone-400">{{(local $.Loc .UpdatedAt).Format "Jan 2, 2006 15:04"}}</div>
         </a>
       </li>
       {{else}}
@@ -38,7 +38,7 @@
         </select>
       </form>
       {{end}}
-      <span>{{with .Author}}by {{.}} · {{end}}updated {{.UpdatedAt.Format "Jan 2, 2006 15:04"}}</span>
+      <span>{{with .Author}}by {{.}} · {{end}}updated {{(local $.Loc .UpdatedAt).Format "Jan 2, 2006 15:04"}}</span>
       <span id="presence" class="ml-auto text-stone-600"></span>
       <span id="save-status"></span>
       {{if .CanEdit}}

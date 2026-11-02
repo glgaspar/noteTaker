@@ -50,7 +50,7 @@
           <div class="font-medium">{{or .Title "Untitled"}}</div>
           {{if .Snippet}}<div class="mt-0.5 text-sm text-stone-600 [&_mark]:rounded [&_mark]:bg-yellow-200 [&_mark]:px-0.5">{{.Snippet}}</div>{{end}}
           <div class="mt-1 text-xs text-stone-400">
-            {{if $.All}}{{.Workspace}} · {{end}}{{with .Folder}}📁 {{.}} · {{end}}{{with .Author}}{{.}} · {{end}}{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}
+            {{if $.All}}{{.Workspace}} · {{end}}{{with .Folder}}📁 {{.}} · {{end}}{{with .Author}}{{.}} · {{end}}{{(local $.Loc .UpdatedAt).Format "Jan 2, 2006 15:04"}}
           </div>
         </a>
       </li>

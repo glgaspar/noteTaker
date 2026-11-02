@@ -80,7 +80,7 @@ func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMs
 		invites = append(invites, i)
 	}
 	s.render(w, "admin.html", map[string]any{
-		"User": currentUser(r), "Users": users, "Invites": invites, "Msg": msg,
+		"User": currentUser(r), "Users": users, "Invites": invites, "Msg": msg, "Loc": userLoc(r),
 	})
 }
 

@@ -104,7 +104,7 @@ func serve(db *pgxpool.Pool) error {
 		},
 	}
 
-	s.tmpl = parseTemplates(template.FuncMap{"asset": s.assetURL})
+	s.tmpl = parseTemplates(template.FuncMap{"asset": s.assetURL, "local": local})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /static/", s.serveStatic)

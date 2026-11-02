@@ -50,10 +50,10 @@ func highlight(s string) template.HTML {
 	return template.HTML(s)
 }
 
-// parseDate reads a date input as midnight in the server's time zone, the zone timestamps
-// are shown in. With nextDay it returns the following midnight, for inclusive end dates.
-func parseDate(s string, nextDay bool) *time.Time {
-	t, err := time.ParseInLocation("2006-01-02", s, time.Local)
+// parseDate reads a date input as midnight in the viewer's time zone, the zone timestamps are
+// shown in. With nextDay it returns the following midnight, for inclusive end dates.
+func parseDate(s string, nextDay bool, loc *time.Location) *time.Time {
+	t, err := time.ParseInLocation("2006-01-02", s, loc)
 	if err != nil {
 		return nil
 	}
@@ -108,7 +108,7 @@ func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *ht
 		LIMIT $10 OFFSET $11`,
 		wsID, prefixQuery(r.FormValue("q")), userID, likeEscaper.Replace(strings.TrimSpace(r.FormValue("title"))),
 		orZero(formID(r, "folder")), orZero(formID(r, "tag")), orZero(formID(r, "author")),
-		parseDate(r.FormValue("from"), false), parseDate(r.FormValue("to"), true),
+		parseDate(r.FormValue("from"), false, userLoc(r)), parseDate(r.FormValue("to"), true, userLoc(r)),
 		searchPageSize+1, page*searchPageSize)
 	if err != nil {
 		return nil, err
