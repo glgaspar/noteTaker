@@ -16,15 +16,26 @@
   </thead>
   <tbody>
     {{range .Users}}
-    <tr class="border-t border-stone-100">
-      <td class="px-4 py-2">{{.Name}}</td>
+    <tr class="border-t border-stone-100 {{if .Disabled}}text-stone-400{{end}}">
+      <td class="px-4 py-2">{{.Name}}{{if .Disabled}} (disabled){{end}}</td>
       <td class="px-4 py-2">{{.Email}}</td>
       <td class="px-4 py-2">{{if .IsAdmin}}Admin{{else}}User{{end}}</td>
       <td class="px-4 py-2">{{.CreatedAt.Format "2006-01-02"}}</td>
-      <td class="px-4 py-2 text-right">
-        <form method="post" action="/admin/users/{{.ID}}/reset" hx-confirm="Send {{.Name}} a password reset link?">
+      <td class="space-x-3 whitespace-nowrap px-4 py-2 text-right">
+        {{if .Disabled}}
+        <form method="post" action="/admin/users/{{.ID}}/enable" class="inline">
+          <button class="text-stone-600 hover:text-stone-900">Enable</button>
+        </form>
+        {{else}}
+        <form method="post" action="/admin/users/{{.ID}}/reset" hx-confirm="Send {{.Name}} a password reset link?" class="inline">
           <button class="text-stone-600 hover:text-stone-900">Reset password</button>
         </form>
+        {{if ne .ID $.User.ID}}
+        <form method="post" action="/admin/users/{{.ID}}/disable" hx-confirm="Disable {{.Name}}? They are signed out everywhere." class="inline">
+          <button class="text-red-600 hover:text-red-800">Disable</button>
+        </form>
+        {{end}}
+        {{end}}
       </td>
     </tr>
     {{end}}

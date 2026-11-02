@@ -75,7 +75,7 @@ func (s *server) requireUser(next http.Handler) http.Handler {
 			err := s.db.QueryRow(r.Context(), `
 				SELECT u.id, u.email, u.name, u.is_admin
 				FROM sessions s JOIN users u ON u.id = s.user_id
-				WHERE s.token_hash = $1 AND s.expires_at > now()`, hashToken(c.Value)).
+				WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hashToken(c.Value)).
 				Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin)
 			if err == nil {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, &u)))
@@ -122,7 +122,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var id int64
 	var hash []byte
-	err := s.db.QueryRow(r.Context(), `SELECT id, password_hash FROM users WHERE email = $1`, email).Scan(&id, &hash)
+	err := s.db.QueryRow(r.Context(), `SELECT id, password_hash FROM users WHERE email = $1 AND disabled_at IS NULL`, email).Scan(&id, &hash)
 	if err != nil {
 		hash = dummyHash
 	}

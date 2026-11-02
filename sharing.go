@@ -42,7 +42,7 @@ func (s *server) shareTarget(r *http.Request) (userID int64, role, msg string, e
 	if role != "editor" && role != "viewer" {
 		return 0, "", "Pick a role.", nil
 	}
-	err = s.db.QueryRow(r.Context(), `SELECT id FROM users WHERE email = $1`, normalizeEmail(r.FormValue("email"))).Scan(&userID)
+	err = s.db.QueryRow(r.Context(), `SELECT id FROM users WHERE email = $1 AND disabled_at IS NULL`, normalizeEmail(r.FormValue("email"))).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", "No user with that email. Ask an admin to invite them first.", nil
 	}

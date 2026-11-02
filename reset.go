@@ -59,7 +59,7 @@ func (s *server) forgot(w http.ResponseWriter, r *http.Request) {
 	s.resetIP.fail(ip)
 	email := normalizeEmail(r.FormValue("email"))
 	var userID int64
-	err := s.db.QueryRow(r.Context(), `SELECT id FROM users WHERE email = $1`, email).Scan(&userID)
+	err := s.db.QueryRow(r.Context(), `SELECT id FROM users WHERE email = $1 AND disabled_at IS NULL`, email).Scan(&userID)
 	if err == nil {
 		link, err := s.newResetLink(r.Context(), userID, time.Hour)
 		if err != nil {
@@ -103,7 +103,10 @@ func (s *server) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	var userID int64
-	err = tx.QueryRow(ctx, `DELETE FROM password_resets WHERE token_hash = $1 AND expires_at > now() RETURNING user_id`,
+	err = tx.QueryRow(ctx, `
+		DELETE FROM password_resets r USING users u
+		WHERE r.token_hash = $1 AND r.expires_at > now() AND u.id = r.user_id AND u.disabled_at IS NULL
+		RETURNING r.user_id`,
 		hashToken(token)).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		s.render(w, "reset.html", map[string]any{"Invalid": true})

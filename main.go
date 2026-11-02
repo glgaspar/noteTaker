@@ -143,6 +143,8 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("GET /admin/users", s.requireAdmin(http.HandlerFunc(s.adminUsers)))
 	mux.Handle("POST /admin/invites", s.requireAdmin(http.HandlerFunc(s.createInvite)))
 	mux.Handle("POST /admin/users/{id}/reset", s.requireAdmin(http.HandlerFunc(s.adminReset)))
+	mux.Handle("POST /admin/users/{id}/disable", s.requireAdmin(s.setDisabled(true)))
+	mux.Handle("POST /admin/users/{id}/enable", s.requireAdmin(s.setDisabled(false)))
 
 	addr := env("ADDR", ":8080")
 	log.Printf("listening on %s (%s)", addr, baseURL)

@@ -36,6 +36,7 @@ type userRow struct {
 	Email     string
 	Name      string
 	IsAdmin   bool
+	Disabled  bool
 	CreatedAt time.Time
 }
 
@@ -51,14 +52,14 @@ func (s *server) adminUsers(w http.ResponseWriter, r *http.Request) {
 func (s *server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMsg) {
 	ctx := r.Context()
 	var users []userRow
-	rows, err := s.db.Query(ctx, `SELECT id, email, name, is_admin, created_at FROM users ORDER BY created_at`)
+	rows, err := s.db.Query(ctx, `SELECT id, email, name, is_admin, disabled_at IS NOT NULL, created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
 	for rows.Next() {
 		var u userRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Disabled, &u.CreatedAt); err != nil {
 			serverError(w, err)
 			return
 		}
@@ -173,4 +174,33 @@ func (s *server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, "/")
+}
+
+// setDisabled disables or re-enables a user. Disabling signs them out everywhere; their notes
+// and memberships stay.
+func (s *server) setDisabled(disable bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		id := pathID(r, "id")
+		if id == currentUser(r).ID {
+			s.renderAdmin(w, r, adminMsg{Error: "You cannot disable yourself."})
+			return
+		}
+		if _, err := s.db.Exec(ctx, `UPDATE users SET disabled_at = CASE WHEN $1 THEN now() END WHERE id = $2`, disable, id); err != nil {
+			serverError(w, err)
+			return
+		}
+		if disable {
+			if _, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+				serverError(w, err)
+				return
+			}
+			if _, err := s.db.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, id); err != nil {
+				serverError(w, err)
+				return
+			}
+			s.hub.kick(id)
+		}
+		redirect(w, r, "/admin/users")
+	}
 }
