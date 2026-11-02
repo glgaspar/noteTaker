@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NoteTaker</title>
-  <link rel="icon" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/dist/app.css">
-  <script src="/static/dist/app.js" defer></script>
+  <link rel="icon" href="{{asset "/static/favicon.svg"}}">
+  <link rel="stylesheet" href="{{asset "/static/dist/app.css"}}">
+  <script src="{{asset "/static/dist/app.js"}}" defer></script>
 </head>
 <body class="flex h-screen flex-col bg-stone-50 text-stone-900" hx-boost="true">
   {{with .User}}

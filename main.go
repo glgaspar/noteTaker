@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"embed"
 	"fmt"
 	"html/template"
 	"log"
@@ -17,9 +16,6 @@ import (
 	"golang.org/x/term"
 )
 
-//go:embed static
-var staticFS embed.FS
-
 type server struct {
 	db      *pgxpool.Pool
 	tmpl    map[string]*template.Template
@@ -28,6 +24,7 @@ type server struct {
 	smtp    smtpConfig
 	hub     hub
 	files   *storage // nil when S3 is not configured
+	assets  map[string]*asset
 }
 
 func env(key, fallback string) string {
@@ -74,10 +71,14 @@ func serve(db *pgxpool.Pool) error {
 	if files == nil {
 		log.Print("S3_ENDPOINT not set; attachments are disabled")
 	}
+	assets, err := loadAssets()
+	if err != nil {
+		return err
+	}
 	s := &server{
 		files:   files,
+		assets:  assets,
 		db:      db,
-		tmpl:    parseTemplates(),
 		baseURL: baseURL,
 		secure:  strings.HasPrefix(baseURL, "https://"),
 		smtp: smtpConfig{
@@ -89,8 +90,10 @@ func serve(db *pgxpool.Pool) error {
 		},
 	}
 
+	s.tmpl = parseTemplates(template.FuncMap{"asset": s.assetURL})
+
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	mux.HandleFunc("GET /static/", s.serveStatic)
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("POST /login", s.login)
 	mux.Handle("POST /logout", s.requireUser(http.HandlerFunc(s.logout)))

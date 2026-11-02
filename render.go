@@ -13,14 +13,15 @@ import (
 var templateFS embed.FS
 
 // parseTemplates pairs each page with the shared layout and partials.
-func parseTemplates() map[string]*template.Template {
+func parseTemplates(funcs template.FuncMap) map[string]*template.Template {
 	pages, err := fs.Glob(templateFS, "templates/pages/*.html")
 	if err != nil {
 		log.Fatal(err)
 	}
 	m := map[string]*template.Template{}
 	for _, p := range pages {
-		m[path.Base(p)] = template.Must(template.ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", p))
+		t := template.New("layout.html").Funcs(funcs)
+		m[path.Base(p)] = template.Must(t.ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", p))
 	}
 	return m
 }
