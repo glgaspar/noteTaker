@@ -5,12 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"maps"
 	"mime"
 	"net/http"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -109,4 +115,62 @@ func (s *server) serveFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeContent(w, r, name, info.LastModified, obj)
+}
+
+// sweepFiles deletes stored files whose attachment row is gone (deleted notes, folders or
+// workspaces cascade to the rows, not to the bucket). Rows are written before their file,
+// so a file without a row is always garbage.
+func sweepFiles(ctx context.Context, db *pgxpool.Pool, st *storage) (int, error) {
+	removed := 0
+	batch := map[int64]string{}
+	flush := func() error {
+		ids := slices.Collect(maps.Keys(batch))
+		rows, err := db.Query(ctx, `SELECT id FROM attachments WHERE id = ANY($1)`, ids)
+		if err != nil {
+			return err
+		}
+		live, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return err
+		}
+		for _, id := range live {
+			delete(batch, id)
+		}
+		for _, key := range batch {
+			if err := st.client.RemoveObject(ctx, st.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+				return err
+			}
+			removed++
+		}
+		clear(batch)
+		return nil
+	}
+	for obj := range st.client.ListObjects(ctx, st.bucket, minio.ListObjectsOptions{Prefix: "attachments/", Recursive: true}) {
+		if obj.Err != nil {
+			return removed, obj.Err
+		}
+		id, err := strconv.ParseInt(strings.TrimPrefix(obj.Key, "attachments/"), 10, 64)
+		if err != nil {
+			continue
+		}
+		batch[id] = obj.Key
+		if len(batch) == 1000 {
+			if err := flush(); err != nil {
+				return removed, err
+			}
+		}
+	}
+	return removed, flush()
+}
+
+// sweepFilesEvery runs sweepFiles now and then on an interval, for the life of the process.
+func sweepFilesEvery(db *pgxpool.Pool, st *storage, interval time.Duration) {
+	for {
+		if n, err := sweepFiles(context.Background(), db, st); err != nil {
+			log.Printf("sweep files: %v", err)
+		} else if n > 0 {
+			log.Printf("sweep files: removed %d orphaned files", n)
+		}
+		time.Sleep(interval)
+	}
 }

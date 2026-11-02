@@ -59,8 +59,10 @@ func main() {
 		err = serve(db)
 	case "create-admin":
 		err = createAdmin(ctx, db, os.Args[2:])
+	case "sweep-files":
+		err = sweepFilesOnce(ctx, db)
 	default:
-		err = fmt.Errorf("unknown command %q (use serve or create-admin)", cmd)
+		err = fmt.Errorf("unknown command %q (use serve, create-admin or sweep-files)", cmd)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -75,6 +77,8 @@ func serve(db *pgxpool.Pool) error {
 	}
 	if files == nil {
 		log.Print("S3_ENDPOINT not set; attachments are disabled")
+	} else {
+		go sweepFilesEvery(db, files, 6*time.Hour)
 	}
 	assets, err := loadAssets()
 	if err != nil {
@@ -186,5 +190,15 @@ func createAdmin(ctx context.Context, db *pgxpool.Pool, args []string) error {
 	if err == nil {
 		fmt.Println("admin created")
 	}
+	return err
+}
+
+func sweepFilesOnce(ctx context.Context, db *pgxpool.Pool) error {
+	files, err := newStorage(ctx)
+	if err != nil || files == nil {
+		return fmt.Errorf("storage not available (set S3_ENDPOINT): %v", err)
+	}
+	n, err := sweepFiles(ctx, db, files)
+	fmt.Printf("removed %d orphaned files\n", n)
 	return err
 }
