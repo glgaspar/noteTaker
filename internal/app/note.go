@@ -16,6 +16,7 @@ type noteItem struct {
 	Title     string
 	Snippet   string
 	UpdatedAt time.Time
+	Tags      []string
 }
 
 type note struct {
@@ -59,7 +60,9 @@ func workspaceURL(wsID, folderID, noteID int64) string {
 // inside a folder or with a tag.
 func (s *Server) noteList(ctx context.Context, userID, wsID, folderID, tagID int64) ([]noteItem, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, title, left(content_text, 120), updated_at FROM notes n
+		SELECT id, title, left(content_text, 120), updated_at,
+			ARRAY(SELECT t.name FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = n.id ORDER BY lower(t.name))
+		FROM notes n
 		WHERE workspace_id = $1 AND ($2 = 0 OR folder_id = $2)
 		AND ($3 = 0 OR EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = $3))
 		AND effective_role($4, workspace_id, folder_id) IS NOT NULL

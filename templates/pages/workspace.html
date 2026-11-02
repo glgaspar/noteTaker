@@ -2,8 +2,9 @@
 <div class="flex h-dvh">
   {{template "sidebar" .}}
 
-  <section id="list-pane" class="flex w-80 shrink-0 flex-col border-r border-line">
+  <section id="list-pane" class="{{if .Note}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-80 md:border-r">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+      {{template "drawer-button"}}
       {{if .TagID}}{{icon "hash" "text-faint"}}{{else if .FolderID}}{{icon "folder-open" "text-faint"}}{{else}}{{icon "file-text" "text-faint"}}{{end}}
       <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
       <span class="text-[12px] text-faint">{{len .Notes}}</span>
@@ -29,6 +30,7 @@
             <span class="ml-auto shrink-0 text-[12px] text-faint">{{ago $.Loc .UpdatedAt}}</span>
           </div>
           {{with .Snippet}}<p class="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{{.}}</p>{{end}}
+          {{with .Tags}}<div class="mt-1.5 flex flex-wrap gap-1">{{range .}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}</div>{{end}}
         </a>
       </li>
       {{else}}
@@ -50,6 +52,7 @@
   {{with .Note}}
   <section id="note-pane" class="flex min-w-0 flex-1 flex-col">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+      <a href="/w/{{$.Workspace.ID}}?{{if $.FolderID}}folder={{$.FolderID}}{{end}}{{if $.TagID}}tag={{$.TagID}}{{end}}" class="btn-icon -ml-1.5 md:hidden" title="Back to notes">{{icon "arrow-left"}}</a>
       <nav class="flex min-w-0 items-center gap-1 text-[13px] text-muted">
         <a href="/w/{{$.Workspace.ID}}" class="truncate hover:text-ink">{{$.Workspace.Name}}</a>
         {{range $.NotePath}}{{icon "chevron-right" "size-3 text-faint"}}<a href="/w/{{$.Workspace.ID}}?folder={{.ID}}" class="truncate hover:text-ink">{{.Name}}</a>{{end}}
@@ -74,15 +77,15 @@
     </header>
 
     <div class="flex-1 overflow-y-auto">
-      <div class="mx-auto max-w-3xl px-6 pb-24 pt-8 sm:px-12">
+      <div class="mx-auto max-w-3xl px-5 pb-24 pt-6 sm:px-12 sm:pt-8">
         <input id="note-title" value="{{.Title}}" placeholder="Untitled" {{if not .CanEdit}}readonly{{end}} autocomplete="off"
-          class="w-full bg-transparent text-[32px] font-bold leading-tight tracking-tight outline-none placeholder:text-faint">
+          class="w-full bg-transparent text-[26px] font-bold leading-tight tracking-tight outline-none placeholder:text-faint sm:text-[32px]">
         <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
           <span>{{with .Author}}{{.}} · {{end}}edited {{ago $.Loc .UpdatedAt}}</span>
           {{template "note_tags" $.NoteTags}}
         </div>
         {{if .CanEdit}}{{template "toolbar" $}}{{end}}
-        <div id="editor" class="prose prose-stone mt-4 max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
+        <div id="editor" class="prose mt-4 max-w-none" data-note-id="{{.ID}}" data-content="{{.Content}}"
           data-editable="{{.CanEdit}}" data-seeded="{{.Seeded}}" data-import-html="{{.ImportHTML}}"
           data-user-id="{{$.User.ID}}" data-user-name="{{$.User.Name}}"></div>
       </div>
@@ -109,7 +112,7 @@
   <section class="hidden flex-1 flex-col items-center justify-center text-center md:flex">
     <span class="mb-3 grid size-12 place-items-center rounded-full bg-hover text-faint">{{icon "notebook-pen" "size-6"}}</span>
     <p class="font-medium">Select a note</p>
-    <p class="mt-1 text-[13px] text-muted">or press <span class="kbd">Ctrl K</span> to find one</p>
+    <p class="mt-1 text-[13px] text-muted">or press <span class="kbd" data-shortcut>Ctrl K</span> to find one</p>
   </section>
   {{end}}
 </div>
@@ -154,9 +157,12 @@
   </span>
   {{end}}
   {{if .CanEdit}}
-  <form hx-post="/notes/{{.NoteID}}/tags" hx-target="#note-tags" hx-swap="outerHTML" class="flex items-center">
-    <input name="name" list="tag-options" placeholder="Add tag" autocomplete="off" {{if .Focus}}autofocus{{end}}
-      class="w-20 rounded bg-transparent px-1.5 py-0.5 text-[12px] text-muted outline-none placeholder:text-faint hover:bg-hover focus:w-32 focus:bg-hover">
+  <form hx-post="/notes/{{.NoteID}}/tags" hx-target="#note-tags" hx-swap="outerHTML">
+    <label class="flex cursor-text items-center gap-1 rounded-full border border-dashed border-line px-2 py-0.5 text-muted transition-colors hover:border-faint hover:text-ink focus-within:border-accent focus-within:text-ink">
+      {{icon "tag" "size-3"}}
+      <input name="name" list="tag-options" placeholder="Add tag" autocomplete="off" {{if .Focus}}autofocus{{end}}
+        class="w-16 bg-transparent text-[12px] outline-none placeholder:text-muted focus:w-28">
+    </label>
   </form>
   {{end}}
 </div>

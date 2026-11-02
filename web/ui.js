@@ -167,6 +167,15 @@ document.addEventListener("htmx:confirm", (e) => {
   confirmDialog(e.detail.question, e.detail.elt.dataset.confirmLabel).then((ok) => ok && e.detail.issueRequest(true));
 });
 
+// ---- sidebar drawer on small screens ----
+
+document.addEventListener("click", (e) => {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
+  if (e.target.closest("[data-drawer-open]")) sidebar.toggleAttribute("data-open", true);
+  else if (e.target.closest("[data-drawer-close]") || (e.target.closest("#sidebar a[href]") && innerWidth < 768)) sidebar.removeAttribute("data-open");
+});
+
 export function initUI() {
   applyTheme();
 }

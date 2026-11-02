@@ -6,10 +6,14 @@
 <span class="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white" style="background: {{color .ID}}">{{initials .Name}}</span>
 {{end}}
 
+{{define "drawer-button"}}
+<button type="button" data-drawer-open class="btn-icon -ml-1.5 md:hidden" title="Menu">{{icon "menu"}}</button>
+{{end}}
+
 {{define "topbar"}}
 <header class="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
   <a href="/" class="flex items-center gap-2 font-semibold">{{template "logo"}} NoteTaker</a>
-  <a href="/" class="btn-ghost ml-2">{{icon "arrow-left"}} Back to notes</a>
+  <a href="/" class="btn-ghost ml-2">{{icon "arrow-left"}}<span class="hidden sm:inline">Back to notes</span></a>
   <div class="ml-auto">{{template "usermenu" .}}</div>
 </header>
 {{end}}

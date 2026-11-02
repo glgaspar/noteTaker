@@ -30,6 +30,11 @@ function open() {
   load(dialog, "");
 }
 
+// Show the shortcut as Macs write it.
+export function labelShortcuts(root) {
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) root.querySelectorAll?.("[data-shortcut]").forEach((el) => (el.textContent = "⌘K"));
+}
+
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
