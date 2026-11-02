@@ -9,6 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "notetaker"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
   # S3-compatible storage for attachments (optional; the app runs without it)
   files:

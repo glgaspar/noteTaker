@@ -70,7 +70,6 @@ func main() {
 }
 
 func serve(db *pgxpool.Pool) error {
-	baseURL := strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/")
 	files, err := newStorage(context.Background())
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)
@@ -81,31 +80,44 @@ func serve(db *pgxpool.Pool) error {
 		go sweepFilesEvery(db, files, 6*time.Hour)
 	}
 	recoverImports(context.Background(), db)
-	assets, err := loadAssets()
+	s, err := newServer(db, files, strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/"))
 	if err != nil {
 		return err
 	}
+	s.trustProxy = os.Getenv("TRUST_PROXY") == "true"
+	s.smtp = smtpConfig{
+		host: os.Getenv("SMTP_HOST"),
+		port: env("SMTP_PORT", "587"),
+		user: os.Getenv("SMTP_USER"),
+		pass: os.Getenv("SMTP_PASS"),
+		from: env("SMTP_FROM", "notetaker@localhost"),
+	}
+	addr := env("ADDR", ":8080")
+	log.Printf("listening on %s (%s)", addr, s.baseURL)
+	srv := &http.Server{Addr: addr, Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
+	return srv.ListenAndServe()
+}
+
+func newServer(db *pgxpool.Pool, files *storage, baseURL string) (*server, error) {
+	assets, err := loadAssets()
+	if err != nil {
+		return nil, err
+	}
 	s := &server{
+		db:           db,
 		files:        files,
 		assets:       assets,
+		baseURL:      baseURL,
+		secure:       strings.HasPrefix(baseURL, "https://"),
 		loginAccount: newLimiter(5, 15*time.Minute),
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
-		trustProxy:   os.Getenv("TRUST_PROXY") == "true",
-		db:           db,
-		baseURL:      baseURL,
-		secure:       strings.HasPrefix(baseURL, "https://"),
-		smtp: smtpConfig{
-			host: os.Getenv("SMTP_HOST"),
-			port: env("SMTP_PORT", "587"),
-			user: os.Getenv("SMTP_USER"),
-			pass: os.Getenv("SMTP_PASS"),
-			from: env("SMTP_FROM", "notetaker@localhost"),
-		},
 	}
-
 	s.tmpl = parseTemplates(template.FuncMap{"asset": s.assetURL, "local": local})
+	return s, nil
+}
 
+func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /static/", s.serveStatic)
 	mux.HandleFunc("GET /login", s.loginPage)
@@ -152,15 +164,7 @@ func serve(db *pgxpool.Pool) error {
 	mux.Handle("POST /admin/users/{id}/reset", s.requireAdmin(http.HandlerFunc(s.adminReset)))
 	mux.Handle("POST /admin/users/{id}/disable", s.requireAdmin(s.setDisabled(true)))
 	mux.Handle("POST /admin/users/{id}/enable", s.requireAdmin(s.setDisabled(false)))
-
-	addr := env("ADDR", ":8080")
-	log.Printf("listening on %s (%s)", addr, baseURL)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           http.NewCrossOriginProtection().Handler(mux),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	return srv.ListenAndServe()
+	return http.NewCrossOriginProtection().Handler(mux)
 }
 
 func createAdmin(ctx context.Context, db *pgxpool.Pool, args []string) error {
