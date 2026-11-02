@@ -80,17 +80,17 @@ func (s *Server) renderWorkspaceMembers(w http.ResponseWriter, r *http.Request, 
 	user := currentUser(r)
 	found, err := s.userWorkspaces(r.Context(), user.ID, pathID(r, "id"))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if len(found) == 0 || found[0].Role == "" {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	ws := found[0]
 	members, err := s.members(r, workspaceMembersQuery, ws.ID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.render(w, "share.html", sharePage{
@@ -110,12 +110,12 @@ func (s *Server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ws.Role != "owner" {
-		http.Error(w, "only the owner can manage members", http.StatusForbidden)
+		s.fail(w, r, http.StatusForbidden, "only the owner can manage members")
 		return
 	}
 	userID, role, msg, err := s.shareTarget(r)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if msg == "" && userID == currentUser(r).ID {
@@ -131,7 +131,7 @@ func (s *Server) addWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = $3 WHERE workspace_members.role <> 'owner'
 		RETURNING xmax = 0`, ws.ID, userID, role).Scan(&added)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.Kick(userID)
@@ -148,18 +148,18 @@ func (s *Server) removeWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	ws, err := s.roleOf(r.Context(), user.ID, workspaceRole, pathID(r, "id"))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	target := pathID(r, "user")
 	leaving := target == user.ID
 	if ws.Role == "" || (!leaving && ws.Role != "owner") || (leaving && ws.Role == "owner") {
-		http.Error(w, "forbidden", http.StatusForbidden)
+		s.fail(w, r, http.StatusForbidden, "forbidden")
 		return
 	}
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND role <> 'owner'`,
 		ws.ID, target); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.Kick(target)
@@ -182,12 +182,12 @@ func (s *Server) renderFolderShares(w http.ResponseWriter, r *http.Request, msg 
 	id := pathID(r, "id")
 	var name string
 	if err := s.db.QueryRow(r.Context(), `SELECT name FROM folders WHERE id = $1`, id).Scan(&name); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	members, err := s.members(r, folderMembersQuery, id)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.render(w, "share.html", sharePage{
@@ -207,7 +207,7 @@ func (s *Server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, role, msg, err := s.shareTarget(r)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if msg != "" {
@@ -219,7 +219,7 @@ func (s *Server) addFolderShare(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO folder_members (folder_id, user_id, role) VALUES ($1, $2, $3)
 		ON CONFLICT (folder_id, user_id) DO UPDATE SET role = $3
 		RETURNING xmax = 0`, pathID(r, "id"), userID, role).Scan(&added); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.Kick(userID)
@@ -240,7 +240,7 @@ func (s *Server) removeFolderShare(w http.ResponseWriter, r *http.Request) {
 	target := pathID(r, "user")
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM folder_members WHERE folder_id = $1 AND user_id = $2`,
 		pathID(r, "id"), target); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.Kick(target)

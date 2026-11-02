@@ -138,7 +138,7 @@ func (s *Server) importNotes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		http.Error(w, "upload too large or invalid", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "upload too large or invalid")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
@@ -151,7 +151,7 @@ func (s *Server) importNotes(w http.ResponseWriter, r *http.Request) {
 	var jobID int64
 	if err := s.db.QueryRow(ctx, `INSERT INTO import_jobs (workspace_id, user_id) VALUES ($1, $2) RETURNING id`,
 		ws.ID, user.ID).Scan(&jobID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	dir := filepath.Join(importDir, strconv.FormatInt(jobID, 10))
@@ -168,7 +168,7 @@ func (s *Server) importNotes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		os.RemoveAll(dir)
 		s.db.Exec(ctx, `DELETE FROM import_jobs WHERE id = $1`, jobID)
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	go s.runImport(jobID, ws.ID, folderID, user.ID, dir, names)
@@ -262,11 +262,11 @@ func (s *Server) importJobPage(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(r.Context(), `SELECT running, stats FROM import_jobs WHERE id = $1 AND workspace_id = $2 AND user_id = $3`,
 		pathID(r, "job"), pathID(r, "id"), currentUser(r).ID).Scan(&running, &stats)
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	var st importStats

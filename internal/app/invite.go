@@ -54,13 +54,13 @@ func (s *Server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMs
 	var users []userRow
 	rows, err := s.db.Query(ctx, `SELECT id, email, name, is_admin, disabled_at IS NOT NULL, created_at FROM users ORDER BY created_at`)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	for rows.Next() {
 		var u userRow
 		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Disabled, &u.CreatedAt); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 		users = append(users, u)
@@ -68,13 +68,13 @@ func (s *Server) renderAdmin(w http.ResponseWriter, r *http.Request, msg adminMs
 	var invites []inviteRow
 	rows, err = s.db.Query(ctx, `SELECT email, expires_at FROM invites WHERE expires_at > now() ORDER BY created_at`)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	for rows.Next() {
 		var i inviteRow
 		if err := rows.Scan(&i.Email, &i.ExpiresAt); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 		invites = append(invites, i)
@@ -93,7 +93,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	var exists bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if exists {
@@ -106,7 +106,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (email) DO UPDATE SET token_hash = $2, invited_by = $3, created_at = now(), expires_at = $4`,
 		email, hashToken(token), currentUser(r).ID, time.Now().Add(inviteTTL))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.renderAdmin(w, r, s.sendLink(email, "You're invited to NoteTaker",
@@ -133,7 +133,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -152,25 +152,25 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	var id int64
 	if err := tx.QueryRow(ctx, `INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id`,
 		email, name, hash).Scan(&id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM invites WHERE email = $1`, email); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if err := s.startSession(ctx, w, id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, "/")
@@ -187,16 +187,16 @@ func (s *Server) setDisabled(disable bool) http.HandlerFunc {
 			return
 		}
 		if _, err := s.db.Exec(ctx, `UPDATE users SET disabled_at = CASE WHEN $1 THEN now() END WHERE id = $2`, disable, id); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 		if disable {
 			if _, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
-				serverError(w, err)
+				s.serverError(w, r, err)
 				return
 			}
 			if _, err := s.db.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, id); err != nil {
-				serverError(w, err)
+				s.serverError(w, r, err)
 				return
 			}
 			s.hub.Kick(id)

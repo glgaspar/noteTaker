@@ -48,19 +48,19 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.files == nil {
-		http.Error(w, "file storage is not configured", http.StatusServiceUnavailable)
+		s.fail(w, r, http.StatusServiceUnavailable, "file storage is not configured")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload+1<<20)
 	f, fh, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "file missing or larger than 25 MB", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "file missing or larger than 25 MB")
 		return
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, maxUpload+1))
 	if err != nil || len(data) > maxUpload {
-		http.Error(w, "file larger than 25 MB", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "file larger than 25 MB")
 		return
 	}
 	mimeType := fh.Header.Get("Content-Type")
@@ -69,7 +69,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.putAttachment(r.Context(), pathID(r, "id"), fh.Filename, mimeType, data)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -86,25 +86,25 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(ctx, `SELECT note_id, name, mime FROM attachments WHERE id = $1`, pathID(r, "id")).
 		Scan(&noteID, &name, &mimeType)
 	if errors.Is(err, pgx.ErrNoRows) || s.files == nil {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	ws, err := s.roleOf(ctx, currentUser(r).ID, noteRole, noteID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if ws.Role == "" {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	obj, modified, err := s.files.Open(ctx, objectKey(pathID(r, "id")))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	defer obj.Close()

@@ -155,7 +155,7 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := s.search(ctx, user.ID, scope, page, r)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if len(results) > searchPageSize {
@@ -172,7 +172,7 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 	}
 	authors, err := s.authors(ctx, user.ID, ws.ID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	data["Authors"] = authors

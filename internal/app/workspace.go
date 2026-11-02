@@ -58,11 +58,11 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request, query string, id 
 	ws, err := s.roleOf(r.Context(), currentUser(r).ID, query, id)
 	switch {
 	case err != nil:
-		serverError(w, err)
+		s.serverError(w, r, err)
 	case ws.Role == "":
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 	case !ws.CanEdit():
-		http.Error(w, "forbidden", http.StatusForbidden)
+		s.fail(w, r, http.StatusForbidden, "forbidden")
 	default:
 		return ws, true
 	}
@@ -101,7 +101,7 @@ func (s *Server) userWorkspaces(ctx context.Context, userID, wsID int64) ([]work
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	workspaces, err := s.userWorkspaces(r.Context(), currentUser(r).ID, 0)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if len(workspaces) > 0 {
@@ -120,23 +120,23 @@ func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	defer tx.Rollback(ctx)
 	var id int64
 	if err := tx.QueryRow(ctx, `INSERT INTO workspaces (name, created_by) VALUES ($1, $2) RETURNING id`,
 		name, currentUser(r).ID).Scan(&id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
 		id, currentUser(r).ID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/w/%d", id))
@@ -149,7 +149,7 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
 		if _, err := s.db.Exec(r.Context(), `UPDATE workspaces SET name = $1 WHERE id = $2`, name, ws.ID); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 	}
@@ -162,11 +162,11 @@ func (s *Server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ws.Role != "owner" {
-		http.Error(w, "only the owner can delete a workspace", http.StatusForbidden)
+		s.fail(w, r, http.StatusForbidden, "only the owner can delete a workspace")
 		return
 	}
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM workspaces WHERE id = $1`, ws.ID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, "/")
@@ -179,27 +179,27 @@ func (s *Server) sidebar(w http.ResponseWriter, r *http.Request) (map[string]any
 	user := currentUser(r)
 	found, err := s.userWorkspaces(ctx, user.ID, pathID(r, "id"))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return nil, false
 	}
 	if len(found) == 0 {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return nil, false
 	}
 	ws := found[0]
 	workspaces, err := s.userWorkspaces(ctx, user.ID, 0)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return nil, false
 	}
 	folders, err := s.folderTree(ctx, ws, user.ID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return nil, false
 	}
 	tags, err := s.workspaceTags(ctx, user.ID, ws.ID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return nil, false
 	}
 	return map[string]any{
@@ -220,18 +220,18 @@ func (s *Server) workspacePage(w http.ResponseWriter, r *http.Request) {
 	folderID, tagID := data["FolderID"].(int64), data["TagID"].(int64)
 	notes, err := s.noteList(ctx, user.ID, ws.ID, folderID, tagID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	n, err := s.loadNote(ctx, user.ID, ws.ID, orZero(formID(r, "note")))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	var nt noteTags
 	if n != nil {
 		if nt, err = s.noteTags(ctx, n.ID, n.CanEdit()); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 	}

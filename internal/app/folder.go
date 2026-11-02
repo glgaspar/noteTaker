@@ -87,7 +87,7 @@ func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 	var id int64
 	if err := s.db.QueryRow(r.Context(), `INSERT INTO folders (workspace_id, parent_id, name) VALUES ($1, $2, $3) RETURNING id`,
 		ws.ID, formID(r, "parent_id"), name).Scan(&id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/w/%d?folder=%d", ws.ID, id))
@@ -101,7 +101,7 @@ func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r, "id")
 	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
 		if _, err := s.db.Exec(r.Context(), `UPDATE folders SET name = $1 WHERE id = $2`, name, id); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 	}
@@ -114,7 +114,7 @@ func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM folders WHERE id = $1`, pathID(r, "id")); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/w/%d", ws.ID))
@@ -130,12 +130,12 @@ func (s *Server) moveFolderPage(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	found, err := s.userWorkspaces(r.Context(), user.ID, ws.ID)
 	if err != nil || len(found) == 0 {
-		serverError(w, fmt.Errorf("workspace %d: %v", ws.ID, err))
+		s.serverError(w, r, fmt.Errorf("workspace %d: %v", ws.ID, err))
 		return
 	}
 	folders, err := s.folderTree(r.Context(), found[0], user.ID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	id := pathID(r, "id")
@@ -174,18 +174,18 @@ func (s *Server) moveFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target.ID != ws.ID {
-		http.Error(w, "folder is in another workspace", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "folder is in another workspace")
 		return
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	defer tx.Rollback(ctx)
 	// Serialize moves within the workspace so two concurrent moves cannot form a cycle.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, ws.ID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	const subtree = `WITH RECURSIVE sub AS (
@@ -195,29 +195,29 @@ func (s *Server) moveFolder(w http.ResponseWriter, r *http.Request) {
 	)`
 	var cycle bool
 	if err := tx.QueryRow(ctx, subtree+` SELECT EXISTS (SELECT 1 FROM sub WHERE id = $2)`, id, parentID).Scan(&cycle); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if cycle {
-		http.Error(w, "a folder cannot be moved into itself", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "a folder cannot be moved into itself")
 		return
 	}
 	if _, err := tx.Exec(ctx, `UPDATE folders SET parent_id = $1 WHERE id = $2`, parentID, id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	rows, err := tx.Query(ctx, subtree+` SELECT n.id FROM notes n JOIN sub ON n.folder_id = sub.id`, id)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	notes, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.KickNotes(notes) // shares inherited from the old or new parents changed

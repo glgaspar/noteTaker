@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center text-center">
+  <span class="mb-4 grid size-12 place-items-center rounded-full bg-hover text-faint">
+    {{if eq .Code 404}}{{icon "search" "size-6"}}{{else if eq .Code 403}}{{icon "shield" "size-6"}}{{else}}{{icon "cloud-off" "size-6"}}{{end}}
+  </span>
+  <p class="text-[12px] font-semibold tracking-wide text-faint">ERROR {{.Code}}</p>
+  <h1 class="mt-1 text-[20px] font-semibold">
+    {{if eq .Code 404}}Not found{{else if eq .Code 403}}Not allowed{{else if ge .Code 500}}Something went wrong{{else}}That didn't work{{end}}
+  </h1>
+  <p class="mt-2 max-w-sm text-[13px] text-muted">
+    {{with .Message}}{{.}}{{else}}
+    {{if eq .Code 404}}This page doesn't exist, or you don't have access to it.
+    {{else if eq .Code 403}}You can see this, but you can't change it. Ask the owner for edit access.
+    {{else if ge .Code 500}}Try again in a moment. If it keeps happening, let your admin know.
+    {{else}}The request couldn't be completed.{{end}}
+    {{end}}
+  </p>
+  <div class="mt-6 flex gap-2">
+    <button type="button" onclick="history.back()" class="btn-secondary">{{icon "arrow-left"}} Go back</button>
+    <a href="/" class="btn-primary">Back to notes</a>
+  </div>
+</div>
+{{end}}

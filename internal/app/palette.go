@@ -18,17 +18,17 @@ func (s *Server) palette(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	found, err := s.userWorkspaces(ctx, user.ID, pathID(r, "id"))
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if len(found) == 0 {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	ws := found[0]
 	notes, err := s.search(ctx, user.ID, ws.ID, 0, r)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	var folders []paletteFolder
@@ -38,11 +38,11 @@ func (s *Server) palette(w http.ResponseWriter, r *http.Request) {
 			WHERE workspace_id = $1 AND name ILIKE '%' || $2 || '%' AND effective_role($3, workspace_id, id) IS NOT NULL
 			ORDER BY lower(name) LIMIT 5`, ws.ID, likeEscaper.Replace(q), user.ID)
 		if err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 		if folders, err = pgx.CollectRows(rows, pgx.RowToStructByPos[paletteFolder]); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 	}

@@ -11,11 +11,11 @@ func (s *Server) noteSocket(w http.ResponseWriter, r *http.Request) {
 	noteID := pathID(r, "id")
 	ws, err := s.roleOf(r.Context(), currentUser(r).ID, noteRole, noteID)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if ws.Role == "" {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	conn, err := websocket.Accept(w, r, nil) // rejects cross-origin requests

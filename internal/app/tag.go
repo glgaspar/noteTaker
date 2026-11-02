@@ -49,7 +49,7 @@ func (s *Server) noteTags(ctx context.Context, noteID int64, canEdit bool) (note
 func (s *Server) renderNoteTags(w http.ResponseWriter, r *http.Request, noteID int64) {
 	nt, err := s.noteTags(r.Context(), noteID, true)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	nt.Focus = true
@@ -77,7 +77,7 @@ func (s *Server) addTag(w http.ResponseWriter, r *http.Request) {
 	noteID := pathID(r, "id")
 	if name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(r.FormValue("name")), "#")); name != "" {
 		if err := s.tagNote(r.Context(), ws.ID, noteID, name); err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 	}
@@ -91,7 +91,7 @@ func (s *Server) removeTag(w http.ResponseWriter, r *http.Request) {
 	noteID := pathID(r, "id")
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM note_tags WHERE note_id = $1 AND tag_id = $2`,
 		noteID, pathID(r, "tag")); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.renderNoteTags(w, r, noteID)

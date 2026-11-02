@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -121,9 +122,35 @@ func (s *Server) renderPartial(w http.ResponseWriter, page, name string, data an
 	}
 }
 
-func serverError(w http.ResponseWriter, err error) {
+func (s *Server) serverError(w http.ResponseWriter, r *http.Request, err error) {
 	if !errors.Is(err, context.Canceled) { // the client went away, e.g. a superseded live search
 		log.Print(err)
 	}
-	http.Error(w, "internal server error", http.StatusInternalServerError)
+	s.fail(w, r, http.StatusInternalServerError, "")
+}
+
+// fail writes an error response: a page for browser navigations, plain text for requests
+// made by scripts (autosave, uploads, partial updates), which show the message themselves.
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	page := strings.Contains(r.Header.Get("Accept"), "text/html")
+	if r.Header.Get("HX-Request") == "true" {
+		page = r.Header.Get("HX-Boosted") == "true"
+	}
+	if !page {
+		http.Error(w, cmp.Or(msg, strings.ToLower(http.StatusText(code))), code)
+		return
+	}
+	if msg == "forbidden" {
+		msg = ""
+	}
+	if msg != "" {
+		msg = strings.ToUpper(msg[:1]) + msg[1:] + "."
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	if err := s.tmpl["error.html"].ExecuteTemplate(w, "layout", map[string]any{
+		"User": currentUser(r), "Code": code, "Message": msg,
+	}); err != nil {
+		log.Printf("render error page: %v", err)
+	}
 }

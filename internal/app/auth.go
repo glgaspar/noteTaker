@@ -89,7 +89,7 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return s.requireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !currentUser(r).IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			s.fail(w, r, http.StatusForbidden, "forbidden")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -134,7 +134,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.loginAccount.clear(account)
 	if err := s.startSession(r.Context(), w, id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, "/")

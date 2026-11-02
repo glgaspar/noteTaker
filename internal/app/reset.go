@@ -33,12 +33,12 @@ const resetBody = "A password reset was requested for your NoteTaker account. Ch
 func (s *Server) adminReset(w http.ResponseWriter, r *http.Request) {
 	var email string
 	if err := s.db.QueryRow(r.Context(), `SELECT email FROM users WHERE id = $1`, pathID(r, "id")).Scan(&email); err != nil {
-		http.NotFound(w, r)
+		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
 	link, err := s.newResetLink(r.Context(), pathID(r, "id"), 24*time.Hour)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.renderAdmin(w, r, s.sendLink(email, "Reset your NoteTaker password", resetBody, link, "Reset link sent to "+email+"."))
@@ -63,14 +63,14 @@ func (s *Server) forgot(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		link, err := s.newResetLink(r.Context(), userID, time.Hour)
 		if err != nil {
-			serverError(w, err)
+			s.serverError(w, r, err)
 			return
 		}
 		if err := s.sendMail(email, "Reset your NoteTaker password", fmt.Sprintf(resetBody, link)); err != nil {
 			log.Printf("send reset to %s: %v", email, err)
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.render(w, "forgot.html", map[string]any{"Sent": true})
@@ -93,12 +93,12 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -113,25 +113,25 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	// A new password signs out every existing session.
 	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, hash, userID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.Kick(userID)
 	if err := s.startSession(ctx, w, userID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, "/")

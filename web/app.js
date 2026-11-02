@@ -34,6 +34,15 @@ document.addEventListener("htmx:beforeSwap", (e) => {
     editor = null;
   }
 });
+// Error pages (404, 403, ...) replace the page on navigation; htmx skips error responses by
+// default. Partial updates keep ignoring them.
+document.addEventListener("htmx:beforeSwap", (e) => {
+  if (e.detail.xhr.status >= 400 && e.detail.boosted) {
+    e.detail.shouldSwap = true;
+    e.detail.isError = false;
+  }
+});
+
 window.addEventListener("pagehide", () => {
   editor?.flush(true);
   // Close the socket so others drop our cursor; the browser may keep this page in its back/forward cache.

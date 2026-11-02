@@ -99,7 +99,7 @@ func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
 	var id int64
 	if err := s.db.QueryRow(r.Context(), `INSERT INTO notes (workspace_id, folder_id, author_id) VALUES ($1, $2, $3) RETURNING id`,
 		ws.ID, folderID, currentUser(r).ID).Scan(&id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, workspaceURL(ws.ID, orZero(folderID), id))
@@ -116,7 +116,7 @@ func (s *Server) saveNote(w http.ResponseWriter, r *http.Request) {
 		Seed    bool            `json:"seed"` // first save after seeding: not a user edit
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid note", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "invalid note")
 		return
 	}
 	if _, err := s.db.Exec(r.Context(), `
@@ -124,7 +124,7 @@ func (s *Server) saveNote(w http.ResponseWriter, r *http.Request) {
 			updated_at = CASE WHEN $5 THEN updated_at ELSE now() END
 		WHERE id = $4`,
 		strings.TrimSpace(body.Title), body.Content, body.Text, pathID(r, "id"), body.Seed); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -142,11 +142,11 @@ func (s *Server) moveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target.ID != ws.ID {
-		http.Error(w, "folder is in another workspace", http.StatusBadRequest)
+		s.fail(w, r, http.StatusBadRequest, "folder is in another workspace")
 		return
 	}
 	if _, err := s.db.Exec(r.Context(), `UPDATE notes SET folder_id = $1 WHERE id = $2`, folderID, id); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	s.hub.KickNotes([]int64{id}) // who may access it can change with the folder
@@ -160,7 +160,7 @@ func (s *Server) deleteNote(w http.ResponseWriter, r *http.Request) {
 	}
 	var folderID *int64
 	if err := s.db.QueryRow(r.Context(), `DELETE FROM notes WHERE id = $1 RETURNING folder_id`, pathID(r, "id")).Scan(&folderID); err != nil {
-		serverError(w, err)
+		s.serverError(w, r, err)
 		return
 	}
 	redirect(w, r, workspaceURL(ws.ID, orZero(folderID), 0))
