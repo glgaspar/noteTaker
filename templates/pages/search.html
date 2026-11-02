@@ -29,6 +29,9 @@
         <input name="from" type="date" value="{{.Form.Get "from"}}" class="rounded border border-stone-300 px-2 py-1">
         <span class="text-stone-400">to</span>
         <input name="to" type="date" value="{{.Form.Get "to"}}" class="rounded border border-stone-300 px-2 py-1">
+        <label class="flex items-center gap-1 text-stone-600">
+          <input type="checkbox" name="all" value="1" {{if eq (.Form.Get "all") "1"}}checked{{end}}> All workspaces
+        </label>
         <a href="/w/{{.Workspace.ID}}/search" class="ml-auto text-stone-500 hover:text-stone-900">Clear</a>
       </div>
     </form>
@@ -43,11 +46,11 @@
 {{define "result_items"}}
       {{range .Results}}
       <li>
-        <a href="/w/{{$.Workspace.ID}}?{{if .FolderID}}folder={{.FolderID}}&{{end}}note={{.ID}}" class="block px-6 py-3 hover:bg-stone-50">
+        <a href="/w/{{.WorkspaceID}}?{{if .FolderID}}folder={{.FolderID}}&{{end}}note={{.ID}}" class="block px-6 py-3 hover:bg-stone-50">
           <div class="font-medium">{{or .Title "Untitled"}}</div>
           {{if .Snippet}}<div class="mt-0.5 text-sm text-stone-600 [&_mark]:rounded [&_mark]:bg-yellow-200 [&_mark]:px-0.5">{{.Snippet}}</div>{{end}}
           <div class="mt-1 text-xs text-stone-400">
-            {{with .Folder}}📁 {{.}} · {{end}}{{with .Author}}{{.}} · {{end}}{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}
+            {{if $.All}}{{.Workspace}} · {{end}}{{with .Folder}}📁 {{.}} · {{end}}{{with .Author}}{{.}} · {{end}}{{.UpdatedAt.Format "Jan 2, 2006 15:04"}}
           </div>
         </a>
       </li>

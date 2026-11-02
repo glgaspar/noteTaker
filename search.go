@@ -14,8 +14,10 @@ import (
 )
 
 type searchResult struct {
-	ID        int64
-	FolderID  int64
+	ID          int64
+	WorkspaceID int64
+	Workspace   string
+	FolderID    int64
 	Title     string
 	Snippet   template.HTML
 	Folder    string
@@ -65,8 +67,8 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 const searchPageSize = 50
 
-// search returns one page of results; it fetches one extra row so callers can tell whether
-// there is a next page.
+// search returns one page of results in a workspace, or in all of the user's with wsID 0. It
+// fetches one extra row so callers can tell whether there is a next page.
 func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *http.Request) ([]searchResult, error) {
 	dateField := "updated_at"
 	if r.FormValue("date_field") == "created" {
@@ -74,15 +76,21 @@ func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *ht
 	}
 	rows, err := s.db.Query(ctx, `
 		WITH q AS (SELECT CASE WHEN $2 = '' THEN NULL ELSE to_tsquery('notes', $2) END AS query)
-		SELECT n.id, coalesce(n.folder_id, 0), n.title,
+		SELECT n.id, n.workspace_id, w.name, coalesce(n.folder_id, 0), n.title,
 			CASE WHEN q.query IS NULL THEN left(n.content_text, 200)
 			ELSE ts_headline('notes', n.content_text, q.query,
 				'StartSel=`+markStart+`, StopSel=`+markStop+`, MaxFragments=2, MaxWords=25, MinWords=8') END,
 			coalesce(f.name, ''), coalesce(u.name, ''), n.updated_at
 		FROM notes n CROSS JOIN q
+		JOIN workspaces w ON w.id = n.workspace_id
 		LEFT JOIN folders f ON f.id = n.folder_id
 		LEFT JOIN users u ON u.id = n.author_id
-		WHERE n.workspace_id = $1
+		WHERE ($1 = 0 OR n.workspace_id = $1)
+			-- workspaces the user is in or has shares in, before the per-note check
+			AND n.workspace_id IN (
+				SELECT workspace_id FROM workspace_members WHERE user_id = $3
+				UNION
+				SELECT f2.workspace_id FROM folder_members fm JOIN folders f2 ON f2.id = fm.folder_id WHERE fm.user_id = $3)
 			AND effective_role($3, n.workspace_id, n.folder_id) IS NOT NULL
 			AND (q.query IS NULL OR n.search @@ q.query)
 			AND ($4 = '' OR n.title ILIKE '%' || $4 || '%')
@@ -109,7 +117,8 @@ func (s *server) search(ctx context.Context, userID, wsID int64, page int, r *ht
 	for rows.Next() {
 		var res searchResult
 		var snippet string
-		if err := rows.Scan(&res.ID, &res.FolderID, &res.Title, &snippet, &res.Folder, &res.Author, &res.UpdatedAt); err != nil {
+		if err := rows.Scan(&res.ID, &res.WorkspaceID, &res.Workspace, &res.FolderID, &res.Title, &snippet,
+			&res.Folder, &res.Author, &res.UpdatedAt); err != nil {
 			return nil, err
 		}
 		res.Snippet = highlight(snippet)
@@ -140,7 +149,11 @@ func (s *server) searchPage(w http.ResponseWriter, r *http.Request) {
 	ws := data["Workspace"].(workspace)
 	page, _ := strconv.Atoi(r.FormValue("page"))
 	page = max(page, 0)
-	results, err := s.search(ctx, user.ID, ws.ID, page, r)
+	scope := ws.ID
+	if r.FormValue("all") == "1" {
+		scope = 0
+	}
+	results, err := s.search(ctx, user.ID, scope, page, r)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -152,6 +165,7 @@ func (s *server) searchPage(w http.ResponseWriter, r *http.Request) {
 		data["NextURL"] = r.URL.Path + "?" + next.Encode()
 	}
 	data["Results"] = results
+	data["All"] = scope == 0
 	if page > 0 { // "Load more" only needs the next items
 		s.renderPartial(w, "search.html", "result_items", data)
 		return
