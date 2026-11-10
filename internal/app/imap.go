@@ -100,20 +100,31 @@ func (s *Server) checkMailbox(ctx context.Context, a mailAccount) error {
 	if newest <= a.LastUID {
 		return s.saveMailboxPlace(ctx, a.SourceID, sel.UIDValidity, a.LastUID)
 	}
-	var set imap.UIDSet
-	set.AddRange(imap.UID(a.LastUID+1), 0) // 0 is "*"
-	msgs, err := c.Fetch(set, &imap.FetchOptions{
+	// List the new messages' UIDs (cheap), then download only the oldest mailPerCheck of them,
+	// so a backlog isn't fetched again on every check.
+	var after imap.UIDSet
+	after.AddRange(imap.UID(a.LastUID+1), 0) // 0 is "*"
+	found, err := c.UIDSearch(&imap.SearchCriteria{UID: []imap.UIDSet{after}}, nil).Wait()
+	if err != nil {
+		return err
+	}
+	// "n:*" also matches the newest message when its UID is below n, so filter.
+	uids := slices.DeleteFunc(found.AllUIDs(), func(u imap.UID) bool { return uint32(u) <= a.LastUID })
+	slices.Sort(uids)
+	if len(uids) == 0 {
+		return s.saveMailboxPlace(ctx, a.SourceID, sel.UIDValidity, a.LastUID)
+	}
+	uids = uids[:min(len(uids), mailPerCheck)]
+	msgs, err := c.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{
 		UID:         true,
 		BodySection: []*imap.FetchItemBodySection{{Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: mailMaxMessage}}},
 	}).Collect()
 	if err != nil {
 		return err
 	}
-	// "n:*" also returns the newest message when its UID is below n, so filter.
-	msgs = slices.DeleteFunc(msgs, func(m *imapclient.FetchMessageBuffer) bool { return uint32(m.UID) <= a.LastUID })
 	slices.SortFunc(msgs, func(x, y *imapclient.FetchMessageBuffer) int { return int(x.UID) - int(y.UID) })
 	last := a.LastUID
-	for _, m := range msgs[:min(len(msgs), mailPerCheck)] {
+	for _, m := range msgs {
 		var body []byte
 		for _, b := range m.BodySection {
 			body = b.Bytes

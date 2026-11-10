@@ -248,3 +248,31 @@ func TestMailboxes(t *testing.T) {
 		t.Error("a mailbox was added without SECRET_KEY")
 	}
 }
+
+func TestMailboxBacklog(t *testing.T) {
+	a := newApp(t, false)
+	a.s.secrets = newSealer("test secret")
+	ctx := context.Background()
+	mail := newMailServer(t)
+	mail.addUser(t, "ann@example.com", "right")
+	ann := a.user("Ann", false)
+	t.Cleanup(func() { testDB.Exec(ctx, `DELETE FROM task_sources WHERE user_id = $1`, ann.ID) })
+	ann.post("/tasks/mailboxes", url.Values{"host": {"127.0.0.1"}, "port": {mail.port}, "username": {"ann@example.com"}, "password": {"right"}})
+	source := dbInt(t, `SELECT id FROM task_sources WHERE user_id = $1`, ann.ID)
+
+	for i := range mailPerCheck + 10 {
+		mail.deliver(t, "ann@example.com", "INBOX", message(fmt.Sprint("m", i), fmt.Sprint("Message ", i), "text/plain", "body"))
+	}
+	count := func() int64 { return dbInt(t, `SELECT count(*) FROM inbox_items WHERE source_id = $1`, source) }
+	a.s.checkMailboxNow(ctx, source)
+	if n := count(); n != mailPerCheck {
+		t.Errorf("first check of a backlog: %d items, want %d", n, mailPerCheck)
+	}
+	a.s.checkMailboxNow(ctx, source)
+	if n := count(); n != mailPerCheck+10 {
+		t.Errorf("second check: %d items, want %d", n, mailPerCheck+10)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE source_id = $1 AND title = 'Message 59'`, source); n != 1 {
+		t.Error("the last message should be there once")
+	}
+}
