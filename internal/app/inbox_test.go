@@ -152,3 +152,55 @@ func TestInbox(t *testing.T) {
 		t.Errorf("%d items left after deleting their source", n)
 	}
 }
+
+func TestSourceTags(t *testing.T) {
+	a := newApp(t, false)
+	ctx := context.Background()
+	ann, ben := a.user("Ann", false), a.user("Ben", false)
+	t.Cleanup(func() { testDB.Exec(ctx, `DELETE FROM task_sources WHERE user_id = $1`, ann.ID) })
+	m := hookInPage.FindStringSubmatch(ann.post("/tasks/sources", url.Values{"name": {"Home Assistant"}, "tags": {"Home, #chores, home, "}}).body)
+	hook := m[1]
+	source := dbInt(t, `SELECT id FROM task_sources WHERE user_id = $1`, ann.ID)
+	itemTags := func() string {
+		var tags []string
+		testDB.QueryRow(ctx, `SELECT tags FROM inbox_items WHERE source_id = $1 ORDER BY id DESC LIMIT 1`, source).Scan(&tags)
+		return strings.Join(tags, ",")
+	}
+
+	// without a model, items keep the source's tags (repeats dropped, first spelling kept)
+	send(t, hook, "text/plain", "Water the plants")
+	a.s.readPending(ctx)
+	if got := itemTags(); got != "Home,chores" {
+		t.Errorf("item tags %q, want Home,chores", got)
+	}
+
+	// with one, its tags follow the source's
+	llm := newFakeLLM(t, func(string) (int, string) { return 200, `{"title": "Pay the bill", "tags": ["home", "bills"]}` })
+	a.s.llm = LLMConfig{URL: llm.URL + "/api", Model: "m"}
+	send(t, hook, "text/plain", "Electricity bill")
+	a.s.readPending(ctx)
+	if got := itemTags(); got != "Home,chores,bills" {
+		t.Errorf("item tags with the model %q, want Home,chores,bills", got)
+	}
+	ann.post(fmt.Sprintf("/tasks/inbox/%d/accept", dbInt(t, `SELECT max(id) FROM inbox_items WHERE source_id = $1`, source)), nil)
+	var taskTags string
+	testDB.QueryRow(ctx, `SELECT string_agg(g.name, ',' ORDER BY lower(g.name)) FROM task_tag_links l JOIN task_tags g ON g.id = l.tag_id
+		JOIN tasks k ON k.id = l.task_id WHERE k.user_id = $1 AND k.title = 'Pay the bill'`, ann.ID).Scan(&taskTags)
+	if taskTags != "bills,chores,Home" {
+		t.Errorf("accepted task tags %q", taskTags)
+	}
+
+	// changing them affects new items; only the owner can
+	a.s.llm = LLMConfig{}
+	ann.post(fmt.Sprintf("/tasks/sources/%d/tags", source), url.Values{"tags": {"work"}})
+	send(t, hook, "text/plain", "Send the report")
+	if got := itemTags(); got != "work" {
+		t.Errorf("after changing the source's tags: %q", got)
+	}
+	if res := ben.post(fmt.Sprintf("/tasks/sources/%d/tags", source), url.Values{"tags": {"hacked"}}); res.code != http.StatusNotFound {
+		t.Errorf("Ben changing Ann's source tags: %d", res.code)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM task_sources WHERE id = $1 AND tags = '{work}'`, source); n != 1 {
+		t.Error("Ann's source tags changed")
+	}
+}

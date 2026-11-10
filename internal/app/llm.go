@@ -114,7 +114,8 @@ func (c LLMConfig) readTask(ctx context.Context, raw string, tags []string, toda
 	return sg, cleanList(out.Tags, 3, true), cleanList(out.Subtasks, 5, false), nil
 }
 
-// cleanList trims, drops empty and repeated entries and keeps at most n.
+// cleanList trims, drops empty and repeated entries (ignoring case; the first spelling stays)
+// and keeps at most n.
 func cleanList(items []string, n int, lower bool) []string {
 	out := []string{}
 	seen := map[string]bool{}
@@ -123,8 +124,8 @@ func cleanList(items []string, n int, lower bool) []string {
 		if lower {
 			v = strings.ToLower(v)
 		}
-		if v != "" && !seen[v] && len(out) < n {
-			seen[v] = true
+		if key := strings.ToLower(v); v != "" && !seen[key] && len(out) < n {
+			seen[key] = true
 			out = append(out, v)
 		}
 	}
@@ -201,23 +202,24 @@ func (s *Server) readPending(ctx context.Context) error {
 	for {
 		var id, userID int64
 		var raw string
-		err := s.db.QueryRow(ctx, `SELECT id, user_id, raw FROM inbox_items WHERE parse_state = 'pending' ORDER BY id LIMIT 1`).
-			Scan(&id, &userID, &raw)
+		var sourceTags []string
+		err := s.db.QueryRow(ctx, `SELECT i.id, i.user_id, i.raw, s.tags FROM inbox_items i JOIN task_sources s ON s.id = i.source_id
+			WHERE i.parse_state = 'pending' ORDER BY i.id LIMIT 1`).Scan(&id, &userID, &raw, &sourceTags)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if err := s.readItem(ctx, id, userID, raw); err != nil {
+		if err := s.readItem(ctx, id, userID, raw, sourceTags); err != nil {
 			return err
 		}
 	}
 }
 
-// readItem asks the user's model about one item. A model's failure is kept on the item (which
-// keeps its guessed title); only database errors are returned.
-func (s *Server) readItem(ctx context.Context, id, userID int64, raw string) error {
+// readItem asks the user's model about one item; its tags follow the source's. A model's
+// failure is kept on the item (which keeps its guessed title); only database errors are returned.
+func (s *Server) readItem(ctx context.Context, id, userID int64, raw string, sourceTags []string) error {
 	cfg, ok, err := s.llmFor(ctx, userID)
 	if err == nil && !ok {
 		_, err = s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'done' WHERE id = $1`, id)
@@ -247,7 +249,7 @@ func (s *Server) readItem(ctx context.Context, id, userID int64, raw string) err
 	}
 	_, err = s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'done', parse_error = '',
 		title = $2, details = $3, due_on = $4, tags = $5, subtasks = $6 WHERE id = $1 AND status = 'new'`,
-		id, sg.Title, sg.Details, sg.DueOn, tags, subtasks)
+		id, sg.Title, sg.Details, sg.DueOn, cleanList(append(sourceTags, tags...), len(sourceTags)+len(tags), false), subtasks)
 	return err
 }
 

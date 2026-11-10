@@ -141,7 +141,9 @@ func TestMailboxes(t *testing.T) {
 	if res := ann.post("/tasks/mailboxes", form("Personal", "", "right")); res.code != http.StatusSeeOther {
 		t.Fatalf("add mailbox: %d %.300s", res.code, res.body)
 	}
-	ann.post("/tasks/mailboxes", form("Work", "Work", "right")) // any number of mailboxes
+	workForm := form("Work", "Work", "right")
+	workForm.Set("tags", "work, email")
+	ann.post("/tasks/mailboxes", workForm) // any number of mailboxes
 	personal := dbInt(t, `SELECT id FROM task_sources WHERE user_id = $1 AND name = 'Personal'`, ann.ID)
 	work := dbInt(t, `SELECT id FROM task_sources WHERE user_id = $1 AND name = 'Work'`, ann.ID)
 	var stored []byte
@@ -173,6 +175,9 @@ func TestMailboxes(t *testing.T) {
 	}
 	if got := titles(work); got != "Review the budget / Before the board meeting." {
 		t.Errorf("Work: %s", got)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE source_id = $1 AND tags = '{work,email}'`, work); n != 1 {
+		t.Error("the Work mailbox's item should carry its tags")
 	}
 	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE parse_state = 'pending'`); n != 3 {
 		t.Errorf("%d items waiting for the model, want 3", n)

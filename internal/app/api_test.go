@@ -136,7 +136,7 @@ func TestAPISources(t *testing.T) {
 	}
 
 	// a second API, importing what it lists; records without an id are told apart by content
-	if res := ann.post("/tasks/apis", form("Chores", "", "Authorization: Bearer t", "id_field", "", "import", "1")); res.code != http.StatusSeeOther {
+	if res := ann.post("/tasks/apis", form("Chores", "", "Authorization: Bearer t", "id_field", "", "import", "1", "tags", "house")); res.code != http.StatusSeeOther {
 		t.Fatalf("add second API: %d %.300s", res.code, res.body)
 	}
 	chores := dbInt(t, `SELECT id FROM task_sources WHERE user_id = $1 AND name = 'Chores'`, ann.ID)
@@ -145,6 +145,9 @@ func TestAPISources(t *testing.T) {
 	a.s.checkAPINow(ctx, chores)
 	if got := items(chores, "new"); !strings.Contains(got, "Water plants, Feed cat") || strings.Count(got, "Water plants") != 1 {
 		t.Errorf("records without ids: %q", got)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE source_id = $1 AND status = 'new' AND tags <> '{house}'`, chores); n != 0 {
+		t.Errorf("%d of Chores' items lack its tag", n)
 	}
 
 	// edit: empty headers keep the saved ones; a broken edit changes nothing

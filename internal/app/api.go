@@ -280,7 +280,7 @@ func apiForm(r *http.Request) (name string, a apiSource, problem string) {
 func (s *Server) apiError(w http.ResponseWriter, r *http.Request, id int64, msg string) {
 	s.renderSources(w, r, map[string]any{"APIError": msg, "APIFormID": id, "APIForm": map[string]string{
 		"name": r.FormValue("name"), "url": r.FormValue("url"), "items_path": r.FormValue("items_path"),
-		"id_field": r.FormValue("id_field"), "every": r.FormValue("every"), "import": r.FormValue("import")}})
+		"id_field": r.FormValue("id_field"), "every": r.FormValue("every"), "import": r.FormValue("import"), "tags": r.FormValue("tags")}})
 }
 
 // sealHeaders encrypts headers for storage; nil when there are none.
@@ -317,8 +317,8 @@ func (s *Server) addAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	err = tx.QueryRow(ctx, `INSERT INTO task_sources (user_id, kind, name) VALUES ($1, 'api', $2) RETURNING id`,
-		currentUser(r).ID, name).Scan(&a.SourceID)
+	err = tx.QueryRow(ctx, `INSERT INTO task_sources (user_id, kind, name, tags) VALUES ($1, 'api', $2, $3) RETURNING id`,
+		currentUser(r).ID, name, formTags(r)).Scan(&a.SourceID)
 	if err == nil {
 		_, err = tx.Exec(ctx, `INSERT INTO api_sources (source_id, url, headers, items_path, id_field, every_minutes, checked_at)
 			VALUES ($1, $2, $3, $4, $5, $6, now())`, a.SourceID, a.URL, sealed, a.ItemsPath, a.IDField, a.Every)

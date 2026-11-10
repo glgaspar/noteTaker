@@ -328,7 +328,7 @@ func mailForm(r *http.Request) (name string, a mailAccount, problem string) {
 func (s *Server) mailboxError(w http.ResponseWriter, r *http.Request, id int64, msg string) {
 	s.renderSources(w, r, map[string]any{"MailError": msg, "MailFormID": id, "MailForm": map[string]string{
 		"name": r.FormValue("name"), "host": r.FormValue("host"), "port": r.FormValue("port"), "security": r.FormValue("security"),
-		"username": r.FormValue("username"), "folder": r.FormValue("folder")}})
+		"username": r.FormValue("username"), "folder": r.FormValue("folder"), "tags": r.FormValue("tags")}})
 }
 
 // tryMailbox logs in to check the settings, and returns where the mailbox is now.
@@ -367,8 +367,8 @@ func (s *Server) addMailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	var id int64
-	err = tx.QueryRow(ctx, `INSERT INTO task_sources (user_id, kind, name) VALUES ($1, 'imap', $2) RETURNING id`,
-		currentUser(r).ID, name).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO task_sources (user_id, kind, name, tags) VALUES ($1, 'imap', $2, $3) RETURNING id`,
+		currentUser(r).ID, name, formTags(r)).Scan(&id)
 	if err == nil {
 		_, err = tx.Exec(ctx, `INSERT INTO imap_accounts (source_id, host, port, security, username, password, folder,
 			uid_validity, last_uid, checked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,

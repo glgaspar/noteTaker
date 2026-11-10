@@ -29,7 +29,8 @@ type source struct {
 	Kind      string
 	Name      string
 	CreatedAt time.Time
-	Items     int // unhandled
+	Tags      []string // every item from it starts with these
+	Items     int      // unhandled
 	// mailboxes only
 	Host      string
 	Port      int
@@ -123,8 +124,9 @@ func (s *Server) addToInbox(ctx context.Context, userID, sourceID int64, raw str
 		return errInboxFull
 	}
 	// the guess shows at once; the inbox reader (llm.go) then asks the user's model
-	if _, err := s.db.Exec(ctx, `INSERT INTO inbox_items (user_id, source_id, external_id, raw, title, details, due_on, parse_state)
-		VALUES ($1, $2, nullif($3, ''), $4, $5, $6, $7, 'pending') ON CONFLICT (source_id, external_id) DO NOTHING`,
+	if _, err := s.db.Exec(ctx, `INSERT INTO inbox_items (user_id, source_id, external_id, raw, title, details, due_on, parse_state, tags)
+		VALUES ($1, $2, nullif($3, ''), $4, $5, $6, $7, 'pending', (SELECT tags FROM task_sources WHERE id = $2))
+		ON CONFLICT (source_id, external_id) DO NOTHING`,
 		userID, sourceID, sg.ExternalID, raw, sg.Title, sg.Details, sg.DueOn); err != nil {
 		return err
 	}
@@ -244,7 +246,7 @@ func (s *Server) discardItem(w http.ResponseWriter, r *http.Request) {
 // renderSources shows the sources page; extra adds messages, a new webhook URL or a form to redo.
 func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, extra map[string]any) {
 	rows, err := s.db.Query(r.Context(), `
-		SELECT s.id, s.kind, s.name, s.created_at,
+		SELECT s.id, s.kind, s.name, s.created_at, s.tags,
 			(SELECT count(*)::int FROM inbox_items i WHERE i.source_id = s.id AND i.status = 'new'),
 			coalesce(a.host, ''), coalesce(a.port, 0), coalesce(a.security, ''), coalesce(a.username, ''),
 			coalesce(a.folder, ''), coalesce(a.checked_at, p.checked_at), coalesce(a.last_error, p.last_error, ''),
@@ -295,12 +297,32 @@ func (s *Server) createSource(w http.ResponseWriter, r *http.Request) {
 	}
 	url, hash := s.hookURL()
 	var id int64
-	if err := s.db.QueryRow(r.Context(), `INSERT INTO task_sources (user_id, kind, name, token_hash)
-		VALUES ($1, 'webhook', $2, $3) RETURNING id`, currentUser(r).ID, name, hash).Scan(&id); err != nil {
+	if err := s.db.QueryRow(r.Context(), `INSERT INTO task_sources (user_id, kind, name, token_hash, tags)
+		VALUES ($1, 'webhook', $2, $3, $4) RETURNING id`, currentUser(r).ID, name, hash, formTags(r)).Scan(&id); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 	s.renderSources(w, r, map[string]any{"NewURL": url, "NewID": id})
+}
+
+// formTags reads the "tags" field: names separated by commas, "#" optional, at most 5.
+func formTags(r *http.Request) []string {
+	return cleanList(strings.Split(r.FormValue("tags"), ","), 5, false)
+}
+
+// setSourceTags changes the tags a source's new items start with.
+func (s *Server) setSourceTags(w http.ResponseWriter, r *http.Request) {
+	tag, err := s.db.Exec(r.Context(), `UPDATE task_sources SET tags = $1 WHERE id = $2 AND user_id = $3`,
+		formTags(r), pathID(r, "id"), currentUser(r).ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		s.fail(w, r, http.StatusNotFound, "")
+		return
+	}
+	redirect(w, r, "/tasks/sources")
 }
 
 // newSourceToken replaces a webhook's URL, so the old one stops working.

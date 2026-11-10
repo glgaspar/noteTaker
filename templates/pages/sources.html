@@ -12,6 +12,9 @@
   <label class="min-w-48 flex-1"><span class="label">New webhook</span>
     <input name="name" placeholder="e.g. Home Assistant, GitHub, Zapier" required autocomplete="off" class="input">
   </label>
+  <label class="min-w-40 flex-1"><span class="label">Tags for its items</span>
+    <input name="tags" placeholder="e.g. home, chores" autocomplete="off" class="input">
+  </label>
   <button class="btn-primary h-9">{{icon "plus"}} Create</button>
 </form>
 
@@ -60,6 +63,12 @@
         <button class="btn-ghost h-7 hover:text-danger">{{icon "trash-2"}} Delete</button>
       </form>
     </div>
+    <form method="post" action="/tasks/sources/{{.ID}}/tags" class="mt-2 flex items-center gap-2 pl-11">
+      {{icon "tag" "text-faint"}}
+      <input name="tags" value="{{join .Tags ", "}}" aria-label="Tags for its items" placeholder="Tags its items start with, e.g. work, email" autocomplete="off"
+        class="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:border-line focus:border-accent">
+      <button class="btn-ghost h-7 px-2">Save tags</button>
+    </form>
     {{if eq .Kind "api"}}
     {{with .LastError}}<p class="alert-warn mt-2 break-words">Last check failed: {{.}}</p>{{end}}
     <div id="edit-{{.ID}}" class="mt-3 border-t border-line pt-3" {{if ne $.APIFormID .ID}}hidden{{end}}>
@@ -157,10 +166,15 @@
   <label class="block sm:col-span-3"><span class="label">Password</span>
     <input name="password" type="password" {{if not .Edit}}required{{end}} autocomplete="new-password" placeholder="{{if .Edit}}Saved; leave empty to keep it{{else}}For Gmail or Outlook, an app password{{end}}" class="input">
   </label>
-  <label class="block sm:col-span-3"><span class="label">Folder</span>
+  <label class="block {{if .Edit}}sm:col-span-3{{else}}sm:col-span-2{{end}}"><span class="label">Folder</span>
     <input name="folder" value="{{index .V "folder"}}" placeholder="INBOX" autocomplete="off" class="input">
   </label>
-  <div class="flex items-end justify-end sm:col-span-3">
+  {{if not .Edit}}
+  <label class="block sm:col-span-2"><span class="label">Tags for its items</span>
+    <input name="tags" value="{{index .V "tags"}}" placeholder="e.g. work, email" autocomplete="off" class="input">
+  </label>
+  {{end}}
+  <div class="flex items-end justify-end {{if .Edit}}sm:col-span-3{{else}}sm:col-span-2{{end}}">
     <button class="btn-primary h-9">{{if .Edit}}Test and save{{else}}{{icon "plus"}} Test and add{{end}}</button>
   </div>
 </form>
@@ -189,6 +203,11 @@
   <label class="block sm:col-span-2"><span class="label">Check every (minutes)</span>
     <input name="every" value="{{index .V "every"}}" inputmode="numeric" placeholder="15" autocomplete="off" class="input">
   </label>
+  {{if not .Edit}}
+  <label class="block sm:col-span-6"><span class="label">Tags for its items</span>
+    <input name="tags" value="{{index .V "tags"}}" placeholder="e.g. github, work" autocomplete="off" class="input">
+  </label>
+  {{end}}
   <label class="flex items-center gap-2 text-[13px] text-muted sm:col-span-4">
     <input type="checkbox" name="import" value="1" {{if index .V "import"}}checked{{end}} class="accent-[var(--accent)]">
     {{if .Edit}}Import the records it lists now (otherwise a new URL or list starts from what's new){{else}}Also import what it lists now (otherwise only new records){{end}}
