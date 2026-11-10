@@ -87,6 +87,7 @@ func serve(ctx context.Context, pool *pgxpool.Pool) error {
 		TrustProxy: os.Getenv("TRUST_PROXY") == "true",
 		LLM:        app.LLMConfig{URL: os.Getenv("LLM_API_URL"), Key: os.Getenv("LLM_API_KEY"), Model: os.Getenv("LLM_MODEL")},
 		SecretKey:  os.Getenv("SECRET_KEY"),
+		Microsoft:  app.MicrosoftConfig{ClientID: os.Getenv("MS_CLIENT_ID"), Tenant: env("MS_TENANT", "common")},
 		SMTP: app.SMTPConfig{
 			Host: os.Getenv("SMTP_HOST"),
 			Port: env("SMTP_PORT", "587"),

@@ -46,6 +46,7 @@ exposing anything.
 | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_SSL` | bucket `notetaker` | Attachment storage; unset = images and files are disabled |
 | `LLM_API_URL`, `LLM_API_KEY`, `LLM_MODEL` | | Default model that turns task inbox items into tasks: any OpenAI-compatible chat API, e.g. Open WebUI `http://host:3024/api` or Ollama `http://host:11434/v1`; unset = titles are guessed, unless a user sets their own |
 | `SECRET_KEY` | | Encrypts credentials users save (mailbox passwords, their own model's API key); unset = they can't add mailboxes or keys. Changing it makes saved ones unreadable |
+| `MS_CLIENT_ID`, `MS_TENANT` | tenant `common` | Microsoft Entra app for Microsoft 365 / Outlook.com mailboxes (see below); unset = those can't be added |
 | `TZ` | | Server time zone, used until a browser reports its own |
 
 ## Commands
@@ -87,6 +88,22 @@ model (`LLM_*` settings, or each user's own) turns each item into a title, detai
 tags and subtasks; without one, or when it fails, the title is guessed. Mailbox passwords and
 API headers are stored encrypted with `SECRET_KEY`. Mailboxes and APIs only import what is new
 after they were added, unless asked otherwise, and mailboxes are opened read-only.
+
+### Microsoft 365 and Outlook.com mailboxes
+
+Microsoft refuses passwords over IMAP, so these mailboxes sign in with Microsoft instead (a code
+entered at microsoft.com/devicelogin). Register the app once in the Microsoft Entra admin center:
+
+1. App registrations → New registration. For work and personal accounts choose "any
+   organizational directory and personal Microsoft accounts" (then `MS_TENANT=common`); for one
+   organisation only, set `MS_TENANT` to its tenant ID. No redirect URI is needed.
+2. Authentication → Advanced settings → Allow public client flows: Yes.
+3. API permissions → Add → APIs my organization uses → Office 365 Exchange Online → Delegated →
+   `IMAP.AccessAsUser.All`; also Microsoft Graph → Delegated → `offline_access`, `openid`, `email`.
+   If users may not consent to apps themselves, an admin clicks "Grant admin consent".
+4. Put the Application (client) ID in `MS_CLIENT_ID`. There is no client secret.
+
+IMAP must also be enabled for the mailbox (Exchange admin center → the mailbox → Email apps).
 
 ## Backups
 

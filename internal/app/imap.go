@@ -43,8 +43,10 @@ type mailAccount struct {
 	Port             int
 	Security         string // "tls" (usually port 993) or "starttls" (143); plain text is refused
 	Username         string
-	Password         string
+	Password         string // or, for Microsoft, the refresh token
 	Folder           string
+	Auth             string // "password" or "microsoft"
+	Token            string // OAuth access token; set, it is used instead of the password
 	UIDValidity      uint32
 	LastUID          uint32
 }
@@ -71,7 +73,12 @@ func openMailbox(a mailAccount) (*imapclient.Client, *imap.SelectData, error) {
 	} else {
 		c = imapclient.New(tls.Client(conn, tlsConfig), opts)
 	}
-	if err := c.Login(a.Username, a.Password).Wait(); err != nil {
+	if a.Token != "" {
+		err = c.Authenticate(xoauth2{a.Username, a.Token})
+	} else {
+		err = c.Login(a.Username, a.Password).Wait()
+	}
+	if err != nil {
 		c.Close()
 		return nil, nil, fmt.Errorf("login failed: %w", err)
 	}
@@ -279,7 +286,10 @@ func (s *Server) checkMailboxNow(ctx context.Context, sourceID int64) error {
 		return err
 	}
 	msg := ""
-	if a.Password, err = s.secrets.open([]byte(a.Password)); err == nil {
+	if a.Password, err = s.secrets.open([]byte(a.Password)); err == nil && a.Auth == "microsoft" {
+		err = s.msAccessToken(ctx, &a)
+	}
+	if err == nil {
 		err = s.checkMailbox(ctx, a)
 	}
 	if err != nil {
@@ -299,8 +309,8 @@ func (s *Server) loadMailAccount(ctx context.Context, sourceID int64) (mailAccou
 	var password []byte
 	var validity, last int64
 	err := s.db.QueryRow(ctx, `SELECT a.source_id, s.user_id, a.host, a.port, a.security, a.username, a.password, a.folder,
-		a.uid_validity, a.last_uid FROM imap_accounts a JOIN task_sources s ON s.id = a.source_id WHERE a.source_id = $1`, sourceID).
-		Scan(&a.SourceID, &a.UserID, &a.Host, &a.Port, &a.Security, &a.Username, &password, &a.Folder, &validity, &last)
+		a.uid_validity, a.last_uid, a.auth FROM imap_accounts a JOIN task_sources s ON s.id = a.source_id WHERE a.source_id = $1`, sourceID).
+		Scan(&a.SourceID, &a.UserID, &a.Host, &a.Port, &a.Security, &a.Username, &password, &a.Folder, &validity, &last, &a.Auth)
 	a.Password, a.UIDValidity, a.LastUID = string(password), uint32(validity), uint32(last)
 	return a, err
 }
@@ -360,7 +370,7 @@ func (s *Server) addMailbox(w http.ResponseWriter, r *http.Request) {
 	case s.secrets == nil:
 		problem = "Mailboxes can't be added: the server has no SECRET_KEY set."
 	case problem == "" && a.Password == "":
-		problem = "Enter the password (for Gmail and Outlook, an app password)."
+		problem = "Enter the password (for Gmail, an app password)."
 	}
 	if problem != "" {
 		s.mailboxError(w, r, 0, problem)
@@ -412,6 +422,10 @@ func (s *Server) ownMailbox(w http.ResponseWriter, r *http.Request) (mailAccount
 func (s *Server) editMailbox(w http.ResponseWriter, r *http.Request) {
 	old, ok := s.ownMailbox(w, r)
 	if !ok {
+		return
+	}
+	if old.Auth == "microsoft" {
+		s.mailboxError(w, r, old.SourceID, "Microsoft mailboxes are changed with Reconnect.")
 		return
 	}
 	name, a, problem := mailForm(r)

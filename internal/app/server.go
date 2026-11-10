@@ -34,6 +34,8 @@ type Server struct {
 	llm          LLMConfig     // the default model for reading inbox items
 	secrets      *sealer       // nil without SECRET_KEY
 	wakeReader   chan struct{} // tells the inbox reader new items arrived
+	microsoft    MicrosoftConfig
+	msPending    msSignIns // Microsoft sign-ins waiting for the user
 }
 
 type Config struct {
@@ -44,6 +46,7 @@ type Config struct {
 	TrustProxy bool             // take client addresses from X-Forwarded-For
 	LLM        LLMConfig        // default model for inbox items; empty URL = none
 	SecretKey  string           // encrypts credentials users save; empty = they can't save any
+	Microsoft  MicrosoftConfig  // app registration for Microsoft 365 mailboxes; empty = none
 }
 
 func New(cfg Config) (*Server, error) {
@@ -66,6 +69,8 @@ func New(cfg Config) (*Server, error) {
 		llm:          cfg.LLM,
 		secrets:      newSealer(cfg.SecretKey),
 		wakeReader:   make(chan struct{}, 1),
+		microsoft:    cfg.Microsoft,
+		msPending:    msSignIns{m: map[string]*msSignIn{}},
 		exportSlots:  make(chan struct{}, exportsAtOnce),
 		importSlots:  make(chan struct{}, importsAtOnce),
 	}
@@ -149,6 +154,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /tasks/apis", auth(s.addAPI))
 	mux.Handle("POST /tasks/apis/{id}/edit", auth(s.editAPI))
 	mux.Handle("POST /tasks/apis/{id}/check", auth(s.checkAPIHandler))
+	mux.Handle("POST /tasks/microsoft", auth(s.startMicrosoft))
+	mux.Handle("GET /tasks/microsoft/{id}", auth(s.microsoftPage))
 	mux.Handle("POST /tasks/mailboxes", auth(s.addMailbox))
 	mux.Handle("POST /tasks/mailboxes/{id}/edit", auth(s.editMailbox))
 	mux.Handle("POST /tasks/mailboxes/{id}/check", auth(s.checkMailboxHandler))

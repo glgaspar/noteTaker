@@ -22,6 +22,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
+	"github.com/emersion/go-sasl"
 )
 
 // mailServer is an in-memory IMAP server on 127.0.0.1 over TLS, trusted through imapTLS.
@@ -49,7 +50,7 @@ func newMailServer(t *testing.T) *mailServer {
 	mem := imapmemserver.New()
 	srv := imapserver.New(&imapserver.Options{
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
-			return mem.NewSession(), nil, nil
+			return oauthSession{mem.NewSession()}, nil, nil
 		},
 		Caps:         imap.CapSet{imap.CapIMAP4rev1: {}},
 		InsecureAuth: true, // the listener is already TLS
@@ -73,6 +74,34 @@ func (m *mailServer) addUser(t *testing.T, name, password string, folders ...str
 	}
 	m.mem.AddUser(u)
 	m.users[name] = u
+}
+
+// oauthSession also accepts SASL XOAUTH2, with the user's password as the bearer token.
+type oauthSession struct{ imapserver.Session }
+
+func (o oauthSession) AuthenticateMechanisms() []string { return []string{"XOAUTH2"} }
+
+func (o oauthSession) Authenticate(mech string) (sasl.Server, error) {
+	return xoauth2Server{o.Session}, nil
+}
+
+type xoauth2Server struct{ sess imapserver.Session }
+
+func (x xoauth2Server) Next(resp []byte) ([]byte, bool, error) {
+	if resp == nil {
+		return []byte{}, false, nil // ask for the initial response
+	}
+	fields := map[string]string{}
+	for _, f := range strings.Split(string(resp), "\x01") {
+		if k, v, ok := strings.Cut(f, "="); ok {
+			fields[k] = v
+		}
+	}
+	token, ok := strings.CutPrefix(fields["auth"], "Bearer ")
+	if !ok {
+		return nil, true, imapserver.ErrAuthFailed
+	}
+	return nil, true, x.sess.Login(fields["user"], token)
 }
 
 type literal struct{ *bytes.Reader }

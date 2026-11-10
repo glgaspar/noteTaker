@@ -1,0 +1,36 @@
+{{define "content"}}
+<a href="/tasks/sources" class="btn-ghost -ml-3 mb-4">{{icon "arrow-left"}} Back to the sources</a>
+<div class="card p-6">
+  <div class="flex items-center gap-3">
+    <span class="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">{{icon "mail" "size-5"}}</span>
+    <div>
+      <h1 class="text-[18px] font-semibold">Sign in with Microsoft</h1>
+      <p class="text-[13px] text-muted">{{if .SignIn.SourceID}}Reconnecting a mailbox{{else}}Adding a Microsoft 365 or Outlook.com mailbox{{end}}</p>
+    </div>
+  </div>
+  {{template "ms_status" .}}
+</div>
+{{end}}
+
+{{/* polled every few seconds until the sign-in ends; success redirects to the sources */}}
+{{define "ms_status"}}
+<div id="ms-status" {{if not .SignIn.Error}}hx-get="/tasks/microsoft/{{.ID}}" hx-trigger="every 5s" hx-swap="outerHTML"{{end}}>
+  {{if .SignIn.Error}}
+  <p class="alert-error mt-5 break-words">{{.SignIn.Error}}</p>
+  <a href="/tasks/sources" class="btn-secondary mt-4">Back to the sources</a>
+  {{else}}
+  <ol class="mt-5 space-y-4 text-[14px]">
+    <li><span class="font-medium">1.</span> Open <a href="{{.SignIn.LoginURL}}" target="_blank" rel="noopener" class="text-accent hover:underline">{{.SignIn.LoginURL}}</a></li>
+    <li><span class="font-medium">2.</span> Enter this code:
+      <div class="mt-2 flex max-w-xs gap-2">
+        <input readonly value="{{.SignIn.UserCode}}" data-action="select" class="input h-11 flex-1 text-center font-mono text-[20px] font-semibold tracking-[0.2em]">
+        <button type="button" class="btn-secondary h-11" data-action="copy-field">{{icon "link"}} Copy</button>
+      </div>
+    </li>
+    <li><span class="font-medium">3.</span> Sign in with the account of the mailbox and allow access.</li>
+  </ol>
+  <p class="mt-6 flex items-center gap-2 text-[13px] text-muted">{{icon "loader-circle" "animate-spin text-accent"}} Waiting for the sign-in… The code works for 15 minutes; this page carries on by itself.</p>
+  <p class="mt-2 text-[12px] text-faint">If Microsoft says the app needs approval, your organisation's IT has to grant it consent first.</p>
+  {{end}}
+</div>
+{{end}}
