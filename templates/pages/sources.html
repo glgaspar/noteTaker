@@ -47,6 +47,33 @@
   {{end}}
 </ul>
 
+<h2 class="section-label mb-2 mt-8 px-0">Reading items with AI</h2>
+<form method="post" action="/tasks/ai" class="card space-y-4 p-4">
+  <label class="flex cursor-pointer items-start gap-3">
+    <input type="checkbox" name="enabled" value="1" {{if .AI.Enabled}}checked{{end}} class="mt-0.5 size-4 accent-[var(--accent)]">
+    <span>
+      <span class="block font-medium">Turn new items into tasks with a language model</span>
+      <span class="text-[13px] text-muted">It writes the title, details, due date, tags and subtasks for you to review. What a source sends is passed to the model{{if .DefaultHost}}; by default that is {{.DefaultModel}} through {{.DefaultHost}}{{end}}. Without it, the title is guessed from the item.</span>
+    </span>
+  </label>
+  {{if not .DefaultHost}}<p class="alert-warn">The server has no default model (LLM_API_URL and LLM_MODEL), so set one below.</p>{{end}}
+  <div class="grid gap-3 sm:grid-cols-2">
+    <label class="block"><span class="label">API address</span>
+      <input name="api_url" value="{{.AI.URL}}" placeholder="{{if .DefaultHost}}Server default{{else}}http://ollama:11434/v1{{end}}" autocomplete="off" class="input">
+    </label>
+    <label class="block"><span class="label">Model</span>
+      <input name="model" value="{{.AI.Model}}" placeholder="{{or .DefaultModel "e.g. llama3.2"}}" autocomplete="off" class="input">
+    </label>
+  </div>
+  <label class="block"><span class="label">API key, for your own address</span>
+    <input name="api_key" type="password" autocomplete="new-password" {{if not .CanSaveKeys}}disabled placeholder="Can't be saved: the server has no SECRET_KEY"{{else if .AI.HasKey}}placeholder="Saved; leave empty to keep it"{{else}}placeholder="Not needed for Ollama"{{end}} class="input">
+  </label>
+  {{if .AI.HasKey}}<label class="flex items-center gap-2 text-[13px] text-muted"><input type="checkbox" name="clear_key" value="1" class="accent-[var(--accent)]"> Remove the saved key</label>{{end}}
+  <p class="text-[12px] text-faint">Any OpenAI-compatible chat API works: Open WebUI (<code>http://host:3024/api</code>), Ollama (<code>http://host:11434/v1</code>) or a hosted one. Leave the address empty to use the server's; the model alone can be changed too.</p>
+  {{with .AIError}}<p class="alert-error">{{.}}</p>{{end}}
+  <div class="flex justify-end"><button class="btn-primary">Save</button></div>
+</form>
+
 <h2 class="section-label mb-2 mt-8 px-0">What to send</h2>
 <div class="card space-y-2 p-4 text-[13px] text-muted">
   <p>A JSON object, up to 64 KB. These fields are read, and the full payload is kept for you to see:</p>

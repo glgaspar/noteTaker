@@ -223,7 +223,8 @@
 {{define "inbox_list"}}
 <ul class="flex-1 divide-y divide-line overflow-y-auto px-2 pb-4">
   {{range .Items}}
-  <li class="px-2 py-3">
+  {{/* while the model reads an item, the item reloads itself */}}
+  <li id="item-{{.ID}}" class="px-2 py-3" {{if eq .ParseState "pending"}}hx-get="/tasks?view=inbox" hx-trigger="every 3s" hx-select="#item-{{.ID}}" hx-swap="outerHTML"{{end}}>
     <div class="mb-1 flex items-center gap-1.5 text-[12px] text-faint">
       <span class="truncate">{{.Source}}</span> · <span class="shrink-0">{{ago $.Loc .ReceivedAt}}</span>
       {{if .DueOn}}<span class="ml-auto shrink-0">due {{.DueOn.Format "Jan 2"}}</span>{{end}}
@@ -235,6 +236,16 @@
       <button formaction="/tasks/inbox/{{.ID}}/discard" class="btn-icon hover:text-danger" title="Discard">{{icon "x"}}</button>
     </form>
     {{with .Details}}<p class="mt-1 line-clamp-3 px-1.5 text-[13px] whitespace-pre-line text-muted">{{.}}</p>{{end}}
+    {{with .Subtasks}}<ul class="mt-1 px-1.5 text-[13px] text-muted">{{range .}}<li class="flex items-center gap-1.5">{{icon "chevron-right" "size-3 text-faint"}}{{.}}</li>{{end}}</ul>{{end}}
+    {{with .Tags}}<div class="mt-1.5 flex flex-wrap gap-1 px-1.5">{{range .}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}</div>{{end}}
+    {{if eq .ParseState "pending"}}
+    <p class="mt-1.5 flex items-center gap-1.5 px-1.5 text-[12px] text-accent">{{icon "loader-circle" "size-3 animate-spin"}} Reading it with AI…</p>
+    {{else if eq .ParseState "failed"}}
+    <form method="post" action="/tasks/inbox/{{.ID}}/retry" class="mt-1.5 flex items-start gap-1.5 px-1.5 text-[12px] text-warn">
+      <span class="min-w-0 flex-1 break-words">AI couldn't read this, so the title is a guess: {{.ParseError}}</span>
+      <button class="shrink-0 cursor-pointer font-medium underline">Retry</button>
+    </form>
+    {{end}}
     <details class="mt-1 px-1.5 text-[12px] text-faint">
       <summary class="cursor-pointer select-none">What was received</summary>
       <pre class="mt-1 max-h-60 overflow-auto rounded-md bg-hover p-2 font-mono text-[11.5px] whitespace-pre-wrap break-all">{{.Raw}}</pre>

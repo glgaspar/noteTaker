@@ -27,10 +27,13 @@ type Server struct {
 	exportSlots chan struct{} // limits exports running at once
 	importSlots chan struct{} // limits imports running at once
 
-	loginAccount *limiter // failed logins per email and address
-	loginIP      *limiter // failed logins per address
-	resetIP      *limiter // password reset requests per address
-	hookRate     *limiter // webhook calls per source
+	loginAccount *limiter      // failed logins per email and address
+	loginIP      *limiter      // failed logins per address
+	resetIP      *limiter      // password reset requests per address
+	hookRate     *limiter      // webhook calls per source
+	llm          LLMConfig     // the default model for reading inbox items
+	secrets      *sealer       // nil without SECRET_KEY
+	wakeReader   chan struct{} // tells the inbox reader new items arrived
 }
 
 type Config struct {
@@ -39,6 +42,8 @@ type Config struct {
 	BaseURL    string           // public URL, for links in emails
 	SMTP       SMTPConfig       // empty Host: emails are only logged
 	TrustProxy bool             // take client addresses from X-Forwarded-For
+	LLM        LLMConfig        // default model for inbox items; empty URL = none
+	SecretKey  string           // encrypts credentials users save; empty = they can't save any
 }
 
 func New(cfg Config) (*Server, error) {
@@ -58,6 +63,9 @@ func New(cfg Config) (*Server, error) {
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
 		hookRate:     newLimiter(60, time.Minute),
+		llm:          cfg.LLM,
+		secrets:      newSealer(cfg.SecretKey),
+		wakeReader:   make(chan struct{}, 1),
 		exportSlots:  make(chan struct{}, exportsAtOnce),
 		importSlots:  make(chan struct{}, importsAtOnce),
 	}
@@ -72,6 +80,7 @@ func (s *Server) StartJobs() {
 	recoverImports(context.Background(), s.db)
 	recoverExports(context.Background(), s)
 	go cleanExportsEvery(s, time.Hour)
+	go s.readInboxEvery(time.Minute)
 	if s.files != nil {
 		go sweepFilesEvery(s.db, s.files, 6*time.Hour)
 	}
@@ -133,6 +142,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /tasks/sources/{id}/delete", auth(s.deleteSource))
 	mux.Handle("POST /tasks/inbox/{id}/accept", auth(s.acceptItem))
 	mux.Handle("POST /tasks/inbox/{id}/discard", auth(s.discardItem))
+	mux.Handle("POST /tasks/inbox/{id}/retry", auth(s.retryItem))
+	mux.Handle("POST /tasks/ai", auth(s.saveLLMSettings))
 	mux.HandleFunc("POST /hooks/{token}", s.receiveHook)
 	mux.Handle("POST /tasks/{id}", auth(s.updateTask))
 	mux.Handle("POST /tasks/{id}/done", auth(s.setDone))

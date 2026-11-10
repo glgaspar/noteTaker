@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,10 @@ type inboxItem struct {
 	Details    string
 	DueOn      *time.Time
 	ReceivedAt time.Time
+	Tags       []string
+	Subtasks   []string
+	ParseState string
+	ParseError string
 }
 
 // suggestion is a task read from what a source received.
@@ -101,10 +106,14 @@ func (s *Server) addToInbox(ctx context.Context, userID, sourceID int64, raw str
 	if full {
 		return errInboxFull
 	}
-	_, err := s.db.Exec(ctx, `INSERT INTO inbox_items (user_id, source_id, external_id, raw, title, details, due_on)
-		VALUES ($1, $2, nullif($3, ''), $4, $5, $6, $7) ON CONFLICT (source_id, external_id) DO NOTHING`,
-		userID, sourceID, sg.ExternalID, raw, sg.Title, sg.Details, sg.DueOn)
-	return err
+	// the guess shows at once; the inbox reader (llm.go) then asks the user's model
+	if _, err := s.db.Exec(ctx, `INSERT INTO inbox_items (user_id, source_id, external_id, raw, title, details, due_on, parse_state)
+		VALUES ($1, $2, nullif($3, ''), $4, $5, $6, $7, 'pending') ON CONFLICT (source_id, external_id) DO NOTHING`,
+		userID, sourceID, sg.ExternalID, raw, sg.Title, sg.Details, sg.DueOn); err != nil {
+		return err
+	}
+	s.wakeInboxReader()
+	return nil
 }
 
 var errInboxFull = errors.New("the inbox is full")
@@ -149,7 +158,7 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) inboxItems(ctx context.Context, userID int64) ([]inboxItem, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT i.id, s.name, i.raw, i.title, i.details, i.due_on, i.received_at
+		SELECT i.id, s.name, i.raw, i.title, i.details, i.due_on, i.received_at, i.tags, i.subtasks, i.parse_state, i.parse_error
 		FROM inbox_items i JOIN task_sources s ON s.id = i.source_id
 		WHERE i.user_id = $1 AND i.status = 'new' ORDER BY i.received_at DESC, i.id DESC`, userID)
 	if err != nil {
@@ -158,20 +167,45 @@ func (s *Server) inboxItems(ctx context.Context, userID int64) ([]inboxItem, err
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[inboxItem])
 }
 
-// acceptItem turns an inbox item into a task, with the title the user may have edited.
+// acceptItem turns an inbox item into a task, with the title the user may have edited, and
+// the subtasks and tags the model suggested.
 func (s *Server) acceptItem(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := currentUser(r).ID
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	defer tx.Rollback(ctx)
 	var taskID int64
-	err := s.db.QueryRow(r.Context(), `
+	var tags, subtasks []string
+	err = tx.QueryRow(ctx, `
 		WITH i AS (
 			UPDATE inbox_items SET status = 'accepted', raw = '' WHERE id = @id AND user_id = @user AND status = 'new'
-			RETURNING title, details, due_on
+			RETURNING title, details, due_on, tags, subtasks
 		)
 		INSERT INTO tasks (user_id, title, details, due_on)
-		SELECT @user, coalesce(nullif(@title, ''), title), details, due_on FROM i RETURNING id`,
-		pgx.NamedArgs{"id": pathID(r, "id"), "user": currentUser(r).ID, "title": strings.TrimSpace(r.FormValue("title"))}).Scan(&taskID)
+		SELECT @user, coalesce(nullif(@title, ''), title), details, due_on FROM i
+		RETURNING id, (SELECT tags FROM i), (SELECT subtasks FROM i)`,
+		pgx.NamedArgs{"id": pathID(r, "id"), "user": userID, "title": strings.TrimSpace(r.FormValue("title"))}).Scan(&taskID, &tags, &subtasks)
 	if errors.Is(err, pgx.ErrNoRows) {
 		s.fail(w, r, http.StatusNotFound, "")
 		return
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, `INSERT INTO tasks (user_id, parent_id, title) SELECT $1, $2, unnest($3::text[])`, userID, taskID, subtasks)
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, `
+			WITH g AS (
+				INSERT INTO task_tags (user_id, name) SELECT $1, unnest($3::text[])
+				ON CONFLICT (user_id, name) DO UPDATE SET name = excluded.name RETURNING id
+			)
+			INSERT INTO task_tag_links (user_id, task_id, tag_id) SELECT $1, $2, id FROM g`, userID, taskID, tags)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
 	}
 	if err != nil {
 		s.serverError(w, r, err)
@@ -191,7 +225,7 @@ func (s *Server) discardItem(w http.ResponseWriter, r *http.Request) {
 
 // ---- managing sources ----
 
-func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, newURL string, newID int64) {
+func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, newURL string, newID int64, aiError string) {
 	rows, err := s.db.Query(r.Context(), `
 		SELECT s.id, s.kind, s.name, s.created_at,
 			(SELECT count(*)::int FROM inbox_items i WHERE i.source_id = s.id AND i.status = 'new')
@@ -205,11 +239,23 @@ func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, newURL st
 		s.serverError(w, r, err)
 		return
 	}
+	ai, _, err := s.loadLLMSettings(r.Context(), currentUser(r).ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	var defaultHost string
+	if u, err := url.Parse(s.llm.URL); err == nil && s.llm.Model != "" {
+		defaultHost = u.Host
+	}
 	s.render(w, "sources.html", map[string]any{"User": currentUser(r), "Loc": userLoc(r), "Sources": sources,
-		"NewURL": newURL, "NewID": newID})
+		"NewURL": newURL, "NewID": newID, "AI": ai, "AIError": aiError, "DefaultModel": s.llm.Model,
+		"DefaultHost": defaultHost, "CanSaveKeys": s.secrets != nil})
 }
 
-func (s *Server) sourcesPage(w http.ResponseWriter, r *http.Request) { s.renderSources(w, r, "", 0) }
+func (s *Server) sourcesPage(w http.ResponseWriter, r *http.Request) {
+	s.renderSources(w, r, "", 0, "")
+}
 
 // hookURL makes a new secret for a webhook, returning its URL and the hash to store.
 func (s *Server) hookURL() (string, []byte) {
@@ -229,7 +275,7 @@ func (s *Server) createSource(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.renderSources(w, r, url, id)
+	s.renderSources(w, r, url, id, "")
 }
 
 // newSourceToken replaces a webhook's URL, so the old one stops working.
@@ -245,7 +291,7 @@ func (s *Server) newSourceToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
-	s.renderSources(w, r, url, pathID(r, "id"))
+	s.renderSources(w, r, url, pathID(r, "id"), "")
 }
 
 func (s *Server) deleteSource(w http.ResponseWriter, r *http.Request) {
