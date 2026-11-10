@@ -82,6 +82,7 @@
   </dialog>
 
   <div id="ws-menu" popover class="menu w-64">
+    <a href="/tasks" class="menu-item">{{icon "list-todo"}} Tasks</a>
     <div class="menu-label">Workspaces</div>
     {{range .Workspaces}}
     <a href="/w/{{.ID}}" class="menu-item">

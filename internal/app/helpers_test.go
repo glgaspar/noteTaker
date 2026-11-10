@@ -189,7 +189,7 @@ func (c *httpClient) putJSON(path string, v any) response {
 	return c.do(req)
 }
 
-var idInURL = regexp.MustCompile(`(?:/w/|folder=|note=)(\d+)$`)
+var idInURL = regexp.MustCompile(`(?:/w/|folder=|note=|task=)(\d+)$`)
 
 // createdID reads the id of a created object from the redirect that follows its creation.
 func createdID(t *testing.T, res response) int64 {
