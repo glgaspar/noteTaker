@@ -15,23 +15,47 @@
   <button class="btn-primary h-9">{{icon "plus"}} Create</button>
 </form>
 
+<details class="card mt-3 p-4" {{if eq .MailFormID 0}}open{{end}}>
+  <summary class="cursor-pointer font-medium">New mailbox</summary>
+  <p class="mt-1 text-[13px] text-muted">Mail that arrives from now on is read every 5 minutes. The mailbox is opened read-only, so nothing there changes, not even what's unread.</p>
+  {{if eq .MailFormID 0}}{{with .MailError}}<p class="alert-error mt-3">{{.}}</p>{{end}}{{end}}
+  {{template "mail_form" (dict "Action" "/tasks/mailboxes" "V" (or (and (eq .MailFormID 0) .MailForm) (dict "security" "tls" "folder" "INBOX")) "Edit" false)}}
+</details>
+
 <h2 class="section-label mb-2 mt-8 px-0">Sources</h2>
 <ul class="card divide-y divide-line">
   {{range .Sources}}
   <li class="px-4 py-3">
     <div class="flex flex-wrap items-center gap-3">
-      <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-hover text-muted">{{icon "link"}}</span>
+      <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-hover text-muted">{{if eq .Kind "imap"}}{{icon "mail"}}{{else}}{{icon "link"}}{{end}}</span>
       <div class="min-w-0 flex-1">
         <div class="truncate font-medium">{{.Name}}</div>
+        {{if eq .Kind "imap"}}
+        <div class="truncate text-[13px] text-muted">{{.Username}} at {{.Host}}{{if ne .Folder "INBOX"}} · {{.Folder}}{{end}}{{with .CheckedAt}} · checked {{ago $.Loc .}}{{end}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
+        {{else}}
         <div class="truncate text-[13px] text-muted">Webhook · added {{(local $.Loc .CreatedAt).Format "Jan 2, 2006"}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
+        {{end}}
       </div>
+      {{if eq .Kind "imap"}}
+      <form method="post" action="/tasks/mailboxes/{{.ID}}/check"><button class="btn-ghost h-7">{{icon "inbox"}} Check now</button></form>
+      <button type="button" class="btn-ghost h-7" data-action="toggle" data-target="edit-{{.ID}}">{{icon "pencil"}} Edit</button>
+      {{else}}
       <form method="post" action="/tasks/sources/{{.ID}}/token" hx-confirm="The current URL of “{{.Name}}” will stop working." data-confirm-label="New URL">
         <button class="btn-ghost h-7">{{icon "key-round"}} New URL</button>
       </form>
+      {{end}}
       <form method="post" action="/tasks/sources/{{.ID}}/delete" hx-confirm="“{{.Name}}” and what it sent to your inbox will be deleted. Accepted tasks stay.">
         <button class="btn-ghost h-7 hover:text-danger">{{icon "trash-2"}} Delete</button>
       </form>
     </div>
+    {{if and (eq .Kind "imap") .LastError}}<p class="alert-warn mt-2 break-words">Last check failed: {{.LastError}}</p>{{end}}
+    {{if eq .Kind "imap"}}
+    <div id="edit-{{.ID}}" class="mt-3 border-t border-line pt-3" {{if ne $.MailFormID .ID}}hidden{{end}}>
+      {{if eq $.MailFormID .ID}}{{with $.MailError}}<p class="alert-error mb-3">{{.}}</p>{{end}}{{end}}
+      {{template "mail_form" (dict "Action" (printf "/tasks/mailboxes/%d/edit" .ID) "Edit" true "V" (or (and (eq $.MailFormID .ID) $.MailForm)
+        (dict "name" .Name "host" .Host "port" (printf "%d" .Port) "security" .Security "username" .Username "folder" .Folder)))}}
+    </div>
+    {{end}}
     {{if eq .ID $.NewID}}
     <div class="mt-3 rounded-lg bg-accent-soft/50 p-3">
       <p class="text-[13px]">Send <code>POST</code> requests to this URL. It is shown only now, so copy it; anyone who has it can add to your inbox.</p>
@@ -43,7 +67,7 @@
     {{end}}
   </li>
   {{else}}
-  <li class="px-4 py-6 text-center text-[13px] text-muted">No sources yet. Create a webhook above.</li>
+  <li class="px-4 py-6 text-center text-[13px] text-muted">No sources yet. Add a webhook or a mailbox above.</li>
   {{end}}
 </ul>
 
@@ -87,4 +111,37 @@
   <pre class="mt-2 overflow-x-auto rounded-md bg-hover p-3 font-mono text-[12px] text-ink">curl -X POST &lt;url&gt; -H 'Content-Type: application/json' \
   -d '{"title": "Renew passport", "due": "2026-12-01"}'</pre>
 </div>
+{{end}}
+
+{{/* the fields of a mailbox; .V holds their values, .Edit makes the password optional */}}
+{{define "mail_form"}}
+<form method="post" action="{{.Action}}" class="mt-3 grid gap-3 sm:grid-cols-6">
+  <label class="block sm:col-span-6"><span class="label">Name</span>
+    <input name="name" value="{{index .V "name"}}" placeholder="e.g. Work mail (defaults to the username)" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-3"><span class="label">IMAP server</span>
+    <input name="host" value="{{index .V "host"}}" required placeholder="imap.gmail.com" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-2"><span class="label">Security</span>
+    <select name="security" class="input">
+      <option value="tls" {{if ne (index .V "security") "starttls"}}selected{{end}}>TLS (port 993)</option>
+      <option value="starttls" {{if eq (index .V "security") "starttls"}}selected{{end}}>STARTTLS (port 143)</option>
+    </select>
+  </label>
+  <label class="block sm:col-span-1"><span class="label">Port</span>
+    <input name="port" value="{{index .V "port"}}" inputmode="numeric" placeholder="auto" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-3"><span class="label">Username</span>
+    <input name="username" value="{{index .V "username"}}" required placeholder="you@example.com" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-3"><span class="label">Password</span>
+    <input name="password" type="password" {{if not .Edit}}required{{end}} autocomplete="new-password" placeholder="{{if .Edit}}Saved; leave empty to keep it{{else}}For Gmail or Outlook, an app password{{end}}" class="input">
+  </label>
+  <label class="block sm:col-span-3"><span class="label">Folder</span>
+    <input name="folder" value="{{index .V "folder"}}" placeholder="INBOX" autocomplete="off" class="input">
+  </label>
+  <div class="flex items-end justify-end sm:col-span-3">
+    <button class="btn-primary h-9">{{if .Edit}}Test and save{{else}}{{icon "plus"}} Test and add{{end}}</button>
+  </div>
+</form>
 {{end}}

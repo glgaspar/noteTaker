@@ -17,7 +17,7 @@ func TestSuggest(t *testing.T) {
 		{`{"subject": "Re: invoice", "text": "please pay"}`, "", "Re: invoice", "please pay", ""},
 		{`{"message": "Water the plants\nthe ones outside"}`, "", "Water the plants", "the ones outside", ""},
 		{"Call the bank\n\nabout the card", "", "Call the bank", "about the card", ""},
-		{`{"due": "soon"}`, "", "Untitled", "", ""},
+		{`{"due": "soon"}`, "", "", "", ""}, // addToInbox names it "Untitled"
 	}
 	for _, c := range cases {
 		sg := suggest(c.raw)

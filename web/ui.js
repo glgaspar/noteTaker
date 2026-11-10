@@ -204,6 +204,9 @@ document.addEventListener("click", (e) => {
     case "select":
       el.select();
       break;
+    case "toggle": // shows or hides the element named by data-target
+      document.getElementById(el.dataset.target)?.toggleAttribute("hidden");
+      break;
     case "open-dialog":
       closeMenus();
       document.getElementById(el.dataset.dialog)?.showModal();

@@ -270,7 +270,7 @@ func (s *Server) saveLLMSettings(w http.ResponseWriter, r *http.Request) {
 	apiURL := strings.TrimSpace(r.FormValue("api_url"))
 	if apiURL != "" {
 		if u, err := url.Parse(apiURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			s.renderSources(w, r, "", 0, "The API address must start with http:// or https://.")
+			s.renderSources(w, r, map[string]any{"AIError": "The API address must start with http:// or https://."})
 			return
 		}
 	}
@@ -285,7 +285,7 @@ func (s *Server) saveLLMSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if k := strings.TrimSpace(r.FormValue("api_key")); k != "" && apiURL != "" {
 		if s.secrets == nil {
-			s.renderSources(w, r, "", 0, "API keys can't be saved: the server has no SECRET_KEY set.")
+			s.renderSources(w, r, map[string]any{"AIError": "API keys can't be saved: the server has no SECRET_KEY set."})
 			return
 		}
 		key = s.secrets.seal(k)

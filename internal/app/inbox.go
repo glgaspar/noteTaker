@@ -30,6 +30,14 @@ type source struct {
 	Name      string
 	CreatedAt time.Time
 	Items     int // unhandled
+	// mailboxes only
+	Host      string
+	Port      int
+	Security  string
+	Username  string
+	Folder    string
+	CheckedAt *time.Time
+	LastError string
 }
 
 type inboxItem struct {
@@ -85,19 +93,21 @@ func suggest(raw string) suggestion {
 		sg.Title, sg.Details, _ = strings.Cut(sg.Details, "\n")
 		sg.Details = strings.TrimSpace(sg.Details)
 	}
+	sg.Title = strings.TrimSpace(sg.Title)
+	return sg
+}
+
+// addToInbox stores what a source received for its user, with a first guess at the task,
+// unless the inbox is full.
+func (s *Server) addToInbox(ctx context.Context, userID, sourceID int64, raw string, sg suggestion) error {
+	clean := func(s string) string { return strings.ReplaceAll(strings.ToValidUTF8(s, "�"), "\x00", "") } // Postgres text refuses both
+	raw, sg.Title, sg.Details, sg.ExternalID = clean(raw), clean(sg.Title), clean(sg.Details), clean(sg.ExternalID)
 	if sg.Title = strings.TrimSpace(sg.Title); sg.Title == "" {
 		sg.Title = "Untitled"
 	}
 	if r := []rune(sg.Title); len(r) > 200 {
 		sg.Title = string(r[:200]) + "…"
 	}
-	return sg
-}
-
-// addToInbox stores what a source received for its user, unless the inbox is full.
-func (s *Server) addToInbox(ctx context.Context, userID, sourceID int64, raw string) error {
-	raw = strings.ReplaceAll(strings.ToValidUTF8(raw, "�"), "\x00", "") // Postgres text refuses both
-	sg := suggest(raw)
 	var full bool
 	if err := s.db.QueryRow(ctx, `SELECT count(*) >= $2 FROM inbox_items WHERE user_id = $1 AND status = 'new'`,
 		userID, inboxMax).Scan(&full); err != nil {
@@ -146,7 +156,7 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "send a JSON object or UTF-8 text", http.StatusBadRequest)
 		return
 	}
-	switch err := s.addToInbox(ctx, userID, sourceID, string(body)); {
+	switch err := s.addToInbox(ctx, userID, sourceID, string(body), suggest(string(body))); {
 	case errors.Is(err, errInboxFull):
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
 	case err != nil:
@@ -225,11 +235,15 @@ func (s *Server) discardItem(w http.ResponseWriter, r *http.Request) {
 
 // ---- managing sources ----
 
-func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, newURL string, newID int64, aiError string) {
+// renderSources shows the sources page; extra adds messages, a new webhook URL or a form to redo.
+func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, extra map[string]any) {
 	rows, err := s.db.Query(r.Context(), `
 		SELECT s.id, s.kind, s.name, s.created_at,
-			(SELECT count(*)::int FROM inbox_items i WHERE i.source_id = s.id AND i.status = 'new')
-		FROM task_sources s WHERE s.user_id = $1 ORDER BY s.created_at, s.id`, currentUser(r).ID)
+			(SELECT count(*)::int FROM inbox_items i WHERE i.source_id = s.id AND i.status = 'new'),
+			coalesce(a.host, ''), coalesce(a.port, 0), coalesce(a.security, ''), coalesce(a.username, ''),
+			coalesce(a.folder, ''), a.checked_at, coalesce(a.last_error, '')
+		FROM task_sources s LEFT JOIN imap_accounts a ON a.source_id = s.id
+		WHERE s.user_id = $1 ORDER BY s.created_at, s.id`, currentUser(r).ID)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
@@ -248,13 +262,16 @@ func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, newURL st
 	if u, err := url.Parse(s.llm.URL); err == nil && s.llm.Model != "" {
 		defaultHost = u.Host
 	}
-	s.render(w, "sources.html", map[string]any{"User": currentUser(r), "Loc": userLoc(r), "Sources": sources,
-		"NewURL": newURL, "NewID": newID, "AI": ai, "AIError": aiError, "DefaultModel": s.llm.Model,
-		"DefaultHost": defaultHost, "CanSaveKeys": s.secrets != nil})
+	data := map[string]any{"User": currentUser(r), "Loc": userLoc(r), "Sources": sources, "NewID": int64(0), "MailFormID": int64(-1),
+		"AI": ai, "DefaultModel": s.llm.Model, "DefaultHost": defaultHost, "CanSaveKeys": s.secrets != nil}
+	for k, v := range extra {
+		data[k] = v
+	}
+	s.render(w, "sources.html", data)
 }
 
 func (s *Server) sourcesPage(w http.ResponseWriter, r *http.Request) {
-	s.renderSources(w, r, "", 0, "")
+	s.renderSources(w, r, nil)
 }
 
 // hookURL makes a new secret for a webhook, returning its URL and the hash to store.
@@ -275,7 +292,7 @@ func (s *Server) createSource(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.renderSources(w, r, url, id, "")
+	s.renderSources(w, r, map[string]any{"NewURL": url, "NewID": id})
 }
 
 // newSourceToken replaces a webhook's URL, so the old one stops working.
@@ -291,7 +308,7 @@ func (s *Server) newSourceToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusNotFound, "")
 		return
 	}
-	s.renderSources(w, r, url, pathID(r, "id"), "")
+	s.renderSources(w, r, map[string]any{"NewURL": url, "NewID": pathID(r, "id")})
 }
 
 func (s *Server) deleteSource(w http.ResponseWriter, r *http.Request) {

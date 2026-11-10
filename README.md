@@ -45,7 +45,7 @@ exposing anything.
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | port `587` | Email for invites, password resets and share notifications; unset = links shown/logged instead |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_SSL` | bucket `notetaker` | Attachment storage; unset = images and files are disabled |
 | `LLM_API_URL`, `LLM_API_KEY`, `LLM_MODEL` | | Default model that turns task inbox items into tasks: any OpenAI-compatible chat API, e.g. Open WebUI `http://host:3024/api` or Ollama `http://host:11434/v1`; unset = titles are guessed, unless a user sets their own |
-| `SECRET_KEY` | | Encrypts credentials users save (their own model's API key); unset = they can't save any. Changing it makes saved ones unreadable |
+| `SECRET_KEY` | | Encrypts credentials users save (mailbox passwords, their own model's API key); unset = they can't add mailboxes or keys. Changing it makes saved ones unreadable |
 | `TZ` | | Server time zone, used until a browser reports its own |
 
 ## Commands
