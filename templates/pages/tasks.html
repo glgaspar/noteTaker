@@ -5,10 +5,11 @@
 
   <section id="list-pane" {{if and .Task .Collapsed.list}}data-collapsed{{end}} class="group {{if .Task}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-96 md:border-l">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
-      {{if .TagID}}{{icon "hash" "text-faint"}}{{else if eq .View "today"}}{{icon "sun" "text-faint"}}{{else if eq .View "completed"}}{{icon "history" "text-faint"}}{{else}}{{icon "list-todo" "text-faint"}}{{end}}
+      {{if .TagID}}{{icon "hash" "text-faint"}}{{else if eq .View "inbox"}}{{icon "inbox" "text-faint"}}{{else if eq .View "today"}}{{icon "sun" "text-faint"}}{{else if eq .View "completed"}}{{icon "history" "text-faint"}}{{else}}{{icon "list-todo" "text-faint"}}{{end}}
       <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
-      <span class="text-[12px] text-faint">{{len .Tasks}}</span>
+      <span class="text-[12px] text-faint">{{if eq .View "inbox"}}{{len .Items}}{{else}}{{len .Tasks}}{{end}}</span>
       <span class="ml-auto flex items-center gap-1">
+        {{if eq .View "inbox"}}<a href="/tasks/sources" class="btn-ghost h-7 px-2">{{icon "settings"}} Sources</a>{{end}}
         {{if not .View}}
         {{/* the row checkboxes belong to this form; the button shows once one is checked */}}
         <form id="today-form" method="post" action="/tasks/today">
@@ -20,6 +21,7 @@
       </span>
       {{template "drawer-button"}}
     </header>
+    {{if eq .View "inbox"}}{{template "inbox_list" .}}{{else}}
     {{if ne .View "completed"}}
     <form method="post" action="/tasks" class="mx-2 mb-2 flex items-center gap-1 rounded-lg border border-line px-2 focus-within:border-accent">
       {{template "task_filter" .}}
@@ -90,6 +92,7 @@
       </li>
       {{end}}
     </ul>
+    {{end}}
   </section>
 
   {{with .Task}}
@@ -216,6 +219,37 @@
 </form>
 {{end}}
 
+{{/* items the sources received, to accept as tasks or discard */}}
+{{define "inbox_list"}}
+<ul class="flex-1 divide-y divide-line overflow-y-auto px-2 pb-4">
+  {{range .Items}}
+  <li class="px-2 py-3">
+    <div class="mb-1 flex items-center gap-1.5 text-[12px] text-faint">
+      <span class="truncate">{{.Source}}</span> · <span class="shrink-0">{{ago $.Loc .ReceivedAt}}</span>
+      {{if .DueOn}}<span class="ml-auto shrink-0">due {{.DueOn.Format "Jan 2"}}</span>{{end}}
+    </div>
+    <form method="post" action="/tasks/inbox/{{.ID}}/accept" class="flex items-center gap-1">
+      <input name="title" value="{{.Title}}" aria-label="Task title" autocomplete="off"
+        class="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 font-medium outline-none hover:border-line focus:border-accent">
+      <button class="btn-icon text-accent" title="Accept as a task">{{icon "check"}}</button>
+      <button formaction="/tasks/inbox/{{.ID}}/discard" class="btn-icon hover:text-danger" title="Discard">{{icon "x"}}</button>
+    </form>
+    {{with .Details}}<p class="mt-1 line-clamp-3 px-1.5 text-[13px] whitespace-pre-line text-muted">{{.}}</p>{{end}}
+    <details class="mt-1 px-1.5 text-[12px] text-faint">
+      <summary class="cursor-pointer select-none">What was received</summary>
+      <pre class="mt-1 max-h-60 overflow-auto rounded-md bg-hover p-2 font-mono text-[11.5px] whitespace-pre-wrap break-all">{{.Raw}}</pre>
+    </details>
+  </li>
+  {{else}}
+  <li class="flex flex-col items-center px-6 py-16 text-center">
+    <span class="mb-3 grid size-10 place-items-center rounded-full bg-hover text-faint">{{icon "inbox" "size-5"}}</span>
+    <p class="font-medium">The inbox is empty</p>
+    <p class="mt-1 text-[13px] text-muted">Items your <a href="/tasks/sources" class="text-accent hover:underline">sources</a> send show up here for you to review.</p>
+  </li>
+  {{end}}
+</ul>
+{{end}}
+
 {{define "tasks_sidebar"}}
 <aside id="sidebar" {{if .Collapsed.sidebar}}data-collapsed{{end}} class="peer fixed inset-y-0 right-0 z-40 flex w-72 translate-x-full flex-col border-l border-line bg-panel transition-transform duration-200 data-open:translate-x-0 md:static md:z-auto md:w-64 md:shrink-0 md:translate-x-0 md:transition-none">
   <div class="p-2">
@@ -227,6 +261,8 @@
   </div>
 
   <nav class="space-y-px px-2">
+    <a href="/tasks?view=inbox" class="nav-item" {{if eq .View "inbox"}}aria-current="page"{{end}}>{{icon "inbox"}} Inbox
+      {{if .InboxCount}}<span class="ml-auto text-[12px] text-faint">{{.InboxCount}}</span>{{end}}</a>
     <a href="/tasks" class="nav-item" {{if not (or .View .TagID)}}aria-current="page"{{end}}>{{icon "list-todo"}} All tasks</a>
     <a href="/tasks?view=today" class="nav-item" {{if eq .View "today"}}aria-current="page"{{end}}>{{icon "sun"}} Today
       {{if .TodayCount}}<span class="ml-auto text-[12px] text-faint">{{.TodayCount}}</span>{{end}}</a>

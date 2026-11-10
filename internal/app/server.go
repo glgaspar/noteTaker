@@ -30,6 +30,7 @@ type Server struct {
 	loginAccount *limiter // failed logins per email and address
 	loginIP      *limiter // failed logins per address
 	resetIP      *limiter // password reset requests per address
+	hookRate     *limiter // webhook calls per source
 }
 
 type Config struct {
@@ -56,6 +57,7 @@ func New(cfg Config) (*Server, error) {
 		loginAccount: newLimiter(5, 15*time.Minute),
 		loginIP:      newLimiter(30, 15*time.Minute),
 		resetIP:      newLimiter(5, time.Hour),
+		hookRate:     newLimiter(60, time.Minute),
 		exportSlots:  make(chan struct{}, exportsAtOnce),
 		importSlots:  make(chan struct{}, importsAtOnce),
 	}
@@ -125,6 +127,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /tasks", auth(s.tasksPage))
 	mux.Handle("POST /tasks", auth(s.createTask))
 	mux.Handle("POST /tasks/today", auth(s.moveToToday))
+	mux.Handle("GET /tasks/sources", auth(s.sourcesPage))
+	mux.Handle("POST /tasks/sources", auth(s.createSource))
+	mux.Handle("POST /tasks/sources/{id}/token", auth(s.newSourceToken))
+	mux.Handle("POST /tasks/sources/{id}/delete", auth(s.deleteSource))
+	mux.Handle("POST /tasks/inbox/{id}/accept", auth(s.acceptItem))
+	mux.Handle("POST /tasks/inbox/{id}/discard", auth(s.discardItem))
+	mux.HandleFunc("POST /hooks/{token}", s.receiveHook)
 	mux.Handle("POST /tasks/{id}", auth(s.updateTask))
 	mux.Handle("POST /tasks/{id}/done", auth(s.setDone))
 	mux.Handle("POST /tasks/{id}/delete", auth(s.deleteTask))
@@ -135,7 +144,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/users/{id}/reset", s.requireAdmin(http.HandlerFunc(s.adminReset)))
 	mux.Handle("POST /admin/users/{id}/disable", s.requireAdmin(s.setDisabled(true)))
 	mux.Handle("POST /admin/users/{id}/enable", s.requireAdmin(s.setDisabled(false)))
-	return s.securityHeaders(http.NewCrossOriginProtection().Handler(mux))
+	csrf := http.NewCrossOriginProtection()
+	csrf.AddInsecureBypassPattern("POST /hooks/{token}") // called by other servers, authorized by the token
+	return s.securityHeaders(csrf.Handler(mux))
 }
 
 // contentPolicy allows scripts only from our own files (no inline scripts or eval). Styles

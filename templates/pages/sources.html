@@ -1,0 +1,63 @@
+{{define "content"}}
+<a href="/tasks?view=inbox" class="btn-ghost -ml-3 mb-4">{{icon "arrow-left"}} Back to the inbox</a>
+<div class="flex items-center gap-3">
+  <span class="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">{{icon "inbox" "size-5"}}</span>
+  <div>
+    <h1 class="text-[20px] font-semibold">Task sources</h1>
+    <p class="text-[13px] text-muted">What your sources send waits in the inbox until you accept or discard it. Only you see them.</p>
+  </div>
+</div>
+
+<form method="post" action="/tasks/sources" class="card mt-6 flex flex-wrap items-end gap-2 p-4">
+  <label class="min-w-48 flex-1"><span class="label">New webhook</span>
+    <input name="name" placeholder="e.g. Home Assistant, GitHub, Zapier" required autocomplete="off" class="input">
+  </label>
+  <button class="btn-primary h-9">{{icon "plus"}} Create</button>
+</form>
+
+<h2 class="section-label mb-2 mt-8 px-0">Sources</h2>
+<ul class="card divide-y divide-line">
+  {{range .Sources}}
+  <li class="px-4 py-3">
+    <div class="flex flex-wrap items-center gap-3">
+      <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-hover text-muted">{{icon "link"}}</span>
+      <div class="min-w-0 flex-1">
+        <div class="truncate font-medium">{{.Name}}</div>
+        <div class="truncate text-[13px] text-muted">Webhook · added {{(local $.Loc .CreatedAt).Format "Jan 2, 2006"}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
+      </div>
+      <form method="post" action="/tasks/sources/{{.ID}}/token" hx-confirm="The current URL of “{{.Name}}” will stop working." data-confirm-label="New URL">
+        <button class="btn-ghost h-7">{{icon "key-round"}} New URL</button>
+      </form>
+      <form method="post" action="/tasks/sources/{{.ID}}/delete" hx-confirm="“{{.Name}}” and what it sent to your inbox will be deleted. Accepted tasks stay.">
+        <button class="btn-ghost h-7 hover:text-danger">{{icon "trash-2"}} Delete</button>
+      </form>
+    </div>
+    {{if eq .ID $.NewID}}
+    <div class="mt-3 rounded-lg bg-accent-soft/50 p-3">
+      <p class="text-[13px]">Send <code>POST</code> requests to this URL. It is shown only now, so copy it; anyone who has it can add to your inbox.</p>
+      <div class="mt-2 flex gap-2">
+        <input readonly value="{{$.NewURL}}" data-action="select" class="input h-8 flex-1 font-mono text-[12px]">
+        <button type="button" class="btn-secondary" data-action="copy-field">{{icon "link"}} Copy</button>
+      </div>
+    </div>
+    {{end}}
+  </li>
+  {{else}}
+  <li class="px-4 py-6 text-center text-[13px] text-muted">No sources yet. Create a webhook above.</li>
+  {{end}}
+</ul>
+
+<h2 class="section-label mb-2 mt-8 px-0">What to send</h2>
+<div class="card space-y-2 p-4 text-[13px] text-muted">
+  <p>A JSON object, up to 64 KB. These fields are read, and the full payload is kept for you to see:</p>
+  <ul class="list-disc space-y-1 pl-5">
+    <li><code>title</code> (or <code>subject</code>, <code>name</code>, <code>summary</code>): the task</li>
+    <li><code>body</code> (or <code>description</code>, <code>details</code>, <code>text</code>, <code>message</code>): its details</li>
+    <li><code>due</code>: a date, <code>2026-11-30</code></li>
+    <li><code>id</code>: optional; an item resent with the same id is not added twice</li>
+  </ul>
+  <p>Plain text works too: the first line becomes the title.</p>
+  <pre class="mt-2 overflow-x-auto rounded-md bg-hover p-3 font-mono text-[12px] text-ink">curl -X POST &lt;url&gt; -H 'Content-Type: application/json' \
+  -d '{"title": "Renew passport", "due": "2026-12-01"}'</pre>
+</div>
+{{end}}

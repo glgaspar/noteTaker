@@ -163,7 +163,7 @@ func (s *Server) taskTags(ctx context.Context, userID, taskID int64) ([]tag, err
 // list filters by tag.
 func taskView(r *http.Request) (view string, tagID int64) {
 	view = r.FormValue("view")
-	if _, ok := taskViews[view]; !ok {
+	if _, ok := taskViews[view]; !ok && view != "inbox" {
 		view = ""
 	}
 	if view == "" {
@@ -198,15 +198,17 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 	view, tagID := taskView(r)
 	taskID, today := orZero(formID(r, "task")), localToday(r)
 	data := map[string]any{"User": user, "View": view, "TagID": tagID, "Today": today, "Loc": userLoc(r),
-		"Collapsed": collapsedPanes(r), "ListTitle": map[string]string{"": "All tasks", "today": "Today", "completed": "Completed"}[view]}
+		"Collapsed": collapsedPanes(r), "ListTitle": map[string]string{"": "All tasks", "today": "Today", "completed": "Completed", "inbox": "Inbox"}[view]}
 	var err error
-	var todayCount int
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE user_id = $1 AND parent_id IS NULL AND today_on = $2 AND done_at IS NULL`,
-		user.ID, today).Scan(&todayCount); err != nil {
+	var todayCount, inboxCount int
+	if err := s.db.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM tasks WHERE user_id = $1 AND parent_id IS NULL AND today_on = $2 AND done_at IS NULL),
+		(SELECT count(*) FROM inbox_items WHERE user_id = $1 AND status = 'new')`,
+		user.ID, today).Scan(&todayCount, &inboxCount); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	data["TodayCount"] = todayCount
+	data["TodayCount"], data["InboxCount"] = todayCount, inboxCount
 	if data["Workspaces"], err = s.userWorkspaces(ctx, user.ID, 0); err != nil {
 		s.serverError(w, r, err)
 		return
@@ -222,7 +224,12 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data["Tags"] = tags
-	if data["Tasks"], err = s.taskList(ctx, user.ID, today, view, tagID); err != nil {
+	if view == "inbox" {
+		data["Items"], err = s.inboxItems(ctx, user.ID)
+	} else {
+		data["Tasks"], err = s.taskList(ctx, user.ID, today, view, tagID)
+	}
+	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
