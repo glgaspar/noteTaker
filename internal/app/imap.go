@@ -228,11 +228,14 @@ func htmlToText(s string) string {
 
 // ---- the checker ----
 
-// checkMailboxesEvery checks each mailbox that is due, one at a time.
-func (s *Server) checkMailboxesEvery(tick time.Duration) {
+// checkSourcesEvery checks the mailboxes and APIs that are due, one at a time.
+func (s *Server) checkSourcesEvery(tick time.Duration) {
 	for {
 		if err := s.checkDueMailboxes(context.Background()); err != nil {
 			log.Printf("mailboxes: %v", err)
+		}
+		if err := s.checkDueAPIs(context.Background()); err != nil {
+			log.Printf("api sources: %v", err)
 		}
 		time.Sleep(tick)
 	}

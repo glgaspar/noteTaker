@@ -38,6 +38,12 @@ type source struct {
 	Folder    string
 	CheckedAt *time.Time
 	LastError string
+	// APIs only
+	URL        string
+	ItemsPath  string
+	IDField    string
+	Every      int
+	HasHeaders bool
 }
 
 type inboxItem struct {
@@ -241,8 +247,10 @@ func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, extra map
 		SELECT s.id, s.kind, s.name, s.created_at,
 			(SELECT count(*)::int FROM inbox_items i WHERE i.source_id = s.id AND i.status = 'new'),
 			coalesce(a.host, ''), coalesce(a.port, 0), coalesce(a.security, ''), coalesce(a.username, ''),
-			coalesce(a.folder, ''), a.checked_at, coalesce(a.last_error, '')
-		FROM task_sources s LEFT JOIN imap_accounts a ON a.source_id = s.id
+			coalesce(a.folder, ''), coalesce(a.checked_at, p.checked_at), coalesce(a.last_error, p.last_error, ''),
+			coalesce(p.url, ''), coalesce(p.items_path, ''), coalesce(p.id_field, ''), coalesce(p.every_minutes, 0),
+			p.headers IS NOT NULL
+		FROM task_sources s LEFT JOIN imap_accounts a ON a.source_id = s.id LEFT JOIN api_sources p ON p.source_id = s.id
 		WHERE s.user_id = $1 ORDER BY s.created_at, s.id`, currentUser(r).ID)
 	if err != nil {
 		s.serverError(w, r, err)
@@ -263,7 +271,7 @@ func (s *Server) renderSources(w http.ResponseWriter, r *http.Request, extra map
 		defaultHost = u.Host
 	}
 	data := map[string]any{"User": currentUser(r), "Loc": userLoc(r), "Sources": sources, "NewID": int64(0), "MailFormID": int64(-1),
-		"AI": ai, "DefaultModel": s.llm.Model, "DefaultHost": defaultHost, "CanSaveKeys": s.secrets != nil}
+		"APIFormID": int64(-1), "AI": ai, "DefaultModel": s.llm.Model, "DefaultHost": defaultHost, "CanSaveKeys": s.secrets != nil}
 	for k, v := range extra {
 		data[k] = v
 	}

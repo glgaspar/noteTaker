@@ -22,22 +22,34 @@
   {{template "mail_form" (dict "Action" "/tasks/mailboxes" "V" (or (and (eq .MailFormID 0) .MailForm) (dict "security" "tls" "folder" "INBOX")) "Edit" false)}}
 </details>
 
+<details class="card mt-3 p-4" {{if eq .APIFormID 0}}open{{end}}>
+  <summary class="cursor-pointer font-medium">New API</summary>
+  <p class="mt-1 text-[13px] text-muted">A URL answering JSON, checked on a schedule. Each record in it becomes an inbox item once, told apart by its id field (or its content, when it has none).</p>
+  {{if eq .APIFormID 0}}{{with .APIError}}<p class="alert-error mt-3">{{.}}</p>{{end}}{{end}}
+  {{template "api_form" (dict "Action" "/tasks/apis" "V" (or (and (eq .APIFormID 0) .APIForm) (dict "id_field" "id" "every" "15")) "Edit" false "HasHeaders" false)}}
+</details>
+
 <h2 class="section-label mb-2 mt-8 px-0">Sources</h2>
 <ul class="card divide-y divide-line">
   {{range .Sources}}
   <li class="px-4 py-3">
     <div class="flex flex-wrap items-center gap-3">
-      <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-hover text-muted">{{if eq .Kind "imap"}}{{icon "mail"}}{{else}}{{icon "link"}}{{end}}</span>
+      <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-hover text-muted">{{if eq .Kind "imap"}}{{icon "mail"}}{{else if eq .Kind "api"}}{{icon "code"}}{{else}}{{icon "link"}}{{end}}</span>
       <div class="min-w-0 flex-1">
         <div class="truncate font-medium">{{.Name}}</div>
         {{if eq .Kind "imap"}}
         <div class="truncate text-[13px] text-muted">{{.Username}} at {{.Host}}{{if ne .Folder "INBOX"}} · {{.Folder}}{{end}}{{with .CheckedAt}} · checked {{ago $.Loc .}}{{end}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
+        {{else if eq .Kind "api"}}
+        <div class="truncate text-[13px] text-muted">{{.URL}}{{with .ItemsPath}} → {{.}}{{end}} · every {{.Every}} min{{with .CheckedAt}} · checked {{ago $.Loc .}}{{end}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
         {{else}}
         <div class="truncate text-[13px] text-muted">Webhook · added {{(local $.Loc .CreatedAt).Format "Jan 2, 2006"}}{{if .Items}} · {{.Items}} in the inbox{{end}}</div>
         {{end}}
       </div>
       {{if eq .Kind "imap"}}
       <form method="post" action="/tasks/mailboxes/{{.ID}}/check"><button class="btn-ghost h-7">{{icon "inbox"}} Check now</button></form>
+      <button type="button" class="btn-ghost h-7" data-action="toggle" data-target="edit-{{.ID}}">{{icon "pencil"}} Edit</button>
+      {{else if eq .Kind "api"}}
+      <form method="post" action="/tasks/apis/{{.ID}}/check"><button class="btn-ghost h-7">{{icon "inbox"}} Check now</button></form>
       <button type="button" class="btn-ghost h-7" data-action="toggle" data-target="edit-{{.ID}}">{{icon "pencil"}} Edit</button>
       {{else}}
       <form method="post" action="/tasks/sources/{{.ID}}/token" hx-confirm="The current URL of “{{.Name}}” will stop working." data-confirm-label="New URL">
@@ -48,6 +60,14 @@
         <button class="btn-ghost h-7 hover:text-danger">{{icon "trash-2"}} Delete</button>
       </form>
     </div>
+    {{if eq .Kind "api"}}
+    {{with .LastError}}<p class="alert-warn mt-2 break-words">Last check failed: {{.}}</p>{{end}}
+    <div id="edit-{{.ID}}" class="mt-3 border-t border-line pt-3" {{if ne $.APIFormID .ID}}hidden{{end}}>
+      {{if eq $.APIFormID .ID}}{{with $.APIError}}<p class="alert-error mb-3">{{.}}</p>{{end}}{{end}}
+      {{template "api_form" (dict "Action" (printf "/tasks/apis/%d/edit" .ID) "Edit" true "HasHeaders" .HasHeaders "V" (or (and (eq $.APIFormID .ID) $.APIForm)
+        (dict "name" .Name "url" .URL "items_path" .ItemsPath "id_field" .IDField "every" (printf "%d" .Every))))}}
+    </div>
+    {{end}}
     {{if and (eq .Kind "imap") .LastError}}<p class="alert-warn mt-2 break-words">Last check failed: {{.LastError}}</p>{{end}}
     {{if eq .Kind "imap"}}
     <div id="edit-{{.ID}}" class="mt-3 border-t border-line pt-3" {{if ne $.MailFormID .ID}}hidden{{end}}>
@@ -67,7 +87,7 @@
     {{end}}
   </li>
   {{else}}
-  <li class="px-4 py-6 text-center text-[13px] text-muted">No sources yet. Add a webhook or a mailbox above.</li>
+  <li class="px-4 py-6 text-center text-[13px] text-muted">No sources yet. Add a webhook, a mailbox or an API above.</li>
   {{end}}
 </ul>
 
@@ -141,6 +161,39 @@
     <input name="folder" value="{{index .V "folder"}}" placeholder="INBOX" autocomplete="off" class="input">
   </label>
   <div class="flex items-end justify-end sm:col-span-3">
+    <button class="btn-primary h-9">{{if .Edit}}Test and save{{else}}{{icon "plus"}} Test and add{{end}}</button>
+  </div>
+</form>
+{{end}}
+
+{{/* the fields of an API source; .V holds their values; .Edit and .HasHeaders change the headers' hint */}}
+{{define "api_form"}}
+<form method="post" action="{{.Action}}" class="mt-3 grid gap-3 sm:grid-cols-6">
+  <label class="block sm:col-span-2"><span class="label">Name</span>
+    <input name="name" value="{{index .V "name"}}" placeholder="e.g. GitHub issues" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-4"><span class="label">URL</span>
+    <input name="url" value="{{index .V "url"}}" required placeholder="https://api.example.com/v1/tasks?assignee=me" autocomplete="off" class="input">
+  </label>
+  <label class="block sm:col-span-6"><span class="label">Headers, one “Name: value” per line</span>
+    <textarea name="headers" rows="2" autocomplete="off" spellcheck="false" class="input h-auto py-2 font-mono text-[12px]"
+      placeholder="{{if .HasHeaders}}Saved and encrypted; leave empty to keep them{{else}}Authorization: Bearer …{{end}}"></textarea>
+  </label>
+  {{if .HasHeaders}}<label class="flex items-center gap-2 text-[13px] text-muted sm:col-span-6"><input type="checkbox" name="clear_headers" value="1" class="accent-[var(--accent)]"> Remove the saved headers</label>{{end}}
+  <label class="block sm:col-span-2"><span class="label">List at</span>
+    <input name="items_path" value="{{index .V "items_path"}}" placeholder="the whole answer, or data.items" autocomplete="off" class="input font-mono text-[13px]">
+  </label>
+  <label class="block sm:col-span-2"><span class="label">Id field</span>
+    <input name="id_field" value="{{index .V "id_field"}}" placeholder="id" autocomplete="off" class="input font-mono text-[13px]">
+  </label>
+  <label class="block sm:col-span-2"><span class="label">Check every (minutes)</span>
+    <input name="every" value="{{index .V "every"}}" inputmode="numeric" placeholder="15" autocomplete="off" class="input">
+  </label>
+  <label class="flex items-center gap-2 text-[13px] text-muted sm:col-span-4">
+    <input type="checkbox" name="import" value="1" {{if index .V "import"}}checked{{end}} class="accent-[var(--accent)]">
+    {{if .Edit}}Import the records it lists now (otherwise a new URL or list starts from what's new){{else}}Also import what it lists now (otherwise only new records){{end}}
+  </label>
+  <div class="flex items-end justify-end sm:col-span-2">
     <button class="btn-primary h-9">{{if .Edit}}Test and save{{else}}{{icon "plus"}} Test and add{{end}}</button>
   </div>
 </form>

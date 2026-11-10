@@ -72,6 +72,22 @@ user) and stay downloadable for 24 hours. Their zips are written to the system t
 Exports only contain notes the person can see. "Print or save as PDF" in a note's menu prints
 just the note.
 
+## Tasks
+
+Each user has a private to-do list at `/tasks` (in the workspace menu): tasks with subtasks,
+tags and due dates; a Today list picked from them; and a Completed history. A task can only be
+checked off in Today, and at the user's midnight checked tasks move to Completed while unchecked
+ones go back to the main list (nothing runs for this: it follows from the date each task was
+moved to Today).
+
+Tasks can also come from **sources**, set up per user under Inbox → Sources: webhooks
+(`POST /hooks/<secret>` with JSON or text), IMAP mailboxes and JSON APIs polled on a schedule,
+any number of each. What they send waits in the Inbox to be accepted or discarded. A language
+model (`LLM_*` settings, or each user's own) turns each item into a title, details, due date,
+tags and subtasks; without one, or when it fails, the title is guessed. Mailbox passwords and
+API headers are stored encrypted with `SECRET_KEY`. Mailboxes and APIs only import what is new
+after they were added, unless asked otherwise, and mailboxes are opened read-only.
+
 ## Backups
 
 Back up the database first, then the files: a file uploaded in between is merely extra (the sweep

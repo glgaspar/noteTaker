@@ -81,7 +81,7 @@ func (s *Server) StartJobs() {
 	recoverExports(context.Background(), s)
 	go cleanExportsEvery(s, time.Hour)
 	go s.readInboxEvery(time.Minute)
-	go s.checkMailboxesEvery(time.Minute)
+	go s.checkSourcesEvery(time.Minute)
 	if s.files != nil {
 		go sweepFilesEvery(s.db, s.files, 6*time.Hour)
 	}
@@ -145,6 +145,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /tasks/inbox/{id}/discard", auth(s.discardItem))
 	mux.Handle("POST /tasks/inbox/{id}/retry", auth(s.retryItem))
 	mux.Handle("POST /tasks/ai", auth(s.saveLLMSettings))
+	mux.Handle("POST /tasks/apis", auth(s.addAPI))
+	mux.Handle("POST /tasks/apis/{id}/edit", auth(s.editAPI))
+	mux.Handle("POST /tasks/apis/{id}/check", auth(s.checkAPIHandler))
 	mux.Handle("POST /tasks/mailboxes", auth(s.addMailbox))
 	mux.Handle("POST /tasks/mailboxes/{id}/edit", auth(s.editMailbox))
 	mux.Handle("POST /tasks/mailboxes/{id}/check", auth(s.checkMailboxHandler))
