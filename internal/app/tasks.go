@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,28 @@ type task struct {
 	ParentTitle string
 	Subtasks    int
 	Tags        []string
+	TodayOn     *time.Time
+	Done        bool
+	Subs        []task `db:"-"` // subtasks, on the Today list
+}
+
+// localToday is the viewer's date, from the time zone their browser reports.
+func localToday(r *http.Request) time.Time {
+	y, m, d := time.Now().In(userLoc(r)).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+func (t task) InToday(today time.Time) bool { return t.TodayOn != nil && t.TodayOn.Equal(today) }
+
+// DayLabel names the day a completed task was on Today: "Yesterday", "Mon, Nov 9", "Mon, Nov 9, 2025".
+func (t task) DayLabel(today time.Time) string {
+	switch {
+	case t.TodayOn.Equal(today.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case t.TodayOn.Year() == today.Year():
+		return t.TodayOn.Format("Mon, Jan 2")
+	}
+	return t.TodayOn.Format("Mon, Jan 2, 2006")
 }
 
 // dueIn is the number of days from today, in the viewer's zone, to the due date.
@@ -57,20 +80,49 @@ const taskColumns = `
 	t.id, coalesce(t.parent_id, 0), t.title, t.details, t.due_on, coalesce(p.title, ''),
 	(SELECT count(*)::int FROM tasks s WHERE s.parent_id = t.id),
 	coalesce((SELECT array_agg(g.name ORDER BY lower(g.name)) FROM task_tag_links l
-		JOIN task_tags g ON g.id = l.tag_id WHERE l.task_id = t.id), '{}')
+		JOIN task_tags g ON g.id = l.tag_id WHERE l.task_id = t.id), '{}'),
+	t.today_on, t.done_at IS NOT NULL
 	FROM tasks t LEFT JOIN tasks p ON p.id = t.parent_id`
 
-// taskList lists the user's top-level tasks, or with tagID every task with that tag,
-// soonest due first.
-func (s *Server) taskList(ctx context.Context, userID, tagID int64) ([]task, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+taskColumns+`
-		WHERE t.user_id = $1 AND CASE WHEN $2::bigint = 0 THEN t.parent_id IS NULL
-			ELSE EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id AND l.tag_id = $2) END
-		ORDER BY t.due_on NULLS LAST, t.created_at, t.id`, userID, tagID)
+// The task lists, by the "view" parameter, with @user, @today (the viewer's date) and @tag.
+var taskViews = map[string]string{
+	// unfinished top-level tasks, or with a tag every unfinished task with that tag; soonest due first
+	"": `t.done_at IS NULL AND CASE WHEN @tag::bigint = 0 THEN t.parent_id IS NULL
+			ELSE EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id AND l.tag_id = @tag) END
+		ORDER BY t.due_on NULLS LAST, t.created_at, t.id`,
+	// moved to Today today, done or not
+	"today": `t.parent_id IS NULL AND t.today_on = @today
+		ORDER BY t.done_at IS NOT NULL, t.due_on NULLS LAST, t.created_at, t.id`,
+	// done on an earlier day, newest day first
+	"completed": `t.parent_id IS NULL AND t.done_at IS NOT NULL AND t.today_on < @today
+		ORDER BY t.today_on DESC, t.done_at DESC, t.id`,
+}
+
+func (s *Server) taskList(ctx context.Context, userID int64, today time.Time, view string, tagID int64) ([]task, error) {
+	args := pgx.NamedArgs{"user": userID, "today": today, "tag": tagID}
+	rows, err := s.db.Query(ctx, `SELECT `+taskColumns+` WHERE t.user_id = @user AND `+taskViews[view], args)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[task])
+	tasks, err := pgx.CollectRows(rows, pgx.RowToStructByPos[task])
+	if err != nil || view != "today" {
+		return tasks, err
+	}
+	// Today shows subtasks under their tasks, to check them off.
+	rows, err = s.db.Query(ctx, `SELECT `+taskColumns+`
+		WHERE t.user_id = $1 AND p.today_on = $2 ORDER BY t.created_at, t.id`, userID, today)
+	if err != nil {
+		return nil, err
+	}
+	subs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[task])
+	for _, sub := range subs {
+		for i := range tasks {
+			if tasks[i].ID == sub.ParentID {
+				tasks[i].Subs = append(tasks[i].Subs, sub)
+			}
+		}
+	}
+	return tasks, err
 }
 
 func (s *Server) subtasks(ctx context.Context, userID, parentID int64) ([]task, error) {
@@ -107,27 +159,54 @@ func (s *Server) taskTags(ctx context.Context, userID, taskID int64) ([]tag, err
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[tag])
 }
 
-// tasksURL is the task page, keeping the tag filter.
-func tasksURL(tagID, taskID int64) string {
+// taskView is the list asked for in the request ("", "today" or "completed"); only the main
+// list filters by tag.
+func taskView(r *http.Request) (view string, tagID int64) {
+	view = r.FormValue("view")
+	if _, ok := taskViews[view]; !ok {
+		view = ""
+	}
+	if view == "" {
+		tagID = orZero(formID(r, "tag"))
+	}
+	return view, tagID
+}
+
+// tasksURL is the task page with taskID open, keeping the request's list.
+func tasksURL(r *http.Request, taskID int64) string {
+	view, tagID := taskView(r)
 	q := url.Values{}
+	if view != "" {
+		q.Set("view", view)
+	}
 	if tagID != 0 {
 		q.Set("tag", fmt.Sprint(tagID))
 	}
-	if taskID != 0 {
-		q.Set("task", fmt.Sprint(taskID))
+	query := q.Encode()
+	if taskID != 0 { // last, as in the page's links
+		query = strings.TrimPrefix(fmt.Sprintf("%s&task=%d", query, taskID), "&")
 	}
-	if len(q) == 0 {
+	if query == "" {
 		return "/tasks"
 	}
-	return "/tasks?" + q.Encode()
+	return "/tasks?" + query
 }
 
 func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := currentUser(r)
-	tagID, taskID := orZero(formID(r, "tag")), orZero(formID(r, "task"))
-	data := map[string]any{"User": user, "TagID": tagID, "Loc": userLoc(r), "Collapsed": collapsedPanes(r), "ListTitle": "All tasks"}
+	view, tagID := taskView(r)
+	taskID, today := orZero(formID(r, "task")), localToday(r)
+	data := map[string]any{"User": user, "View": view, "TagID": tagID, "Today": today, "Loc": userLoc(r),
+		"Collapsed": collapsedPanes(r), "ListTitle": map[string]string{"": "All tasks", "today": "Today", "completed": "Completed"}[view]}
 	var err error
+	var todayCount int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE user_id = $1 AND parent_id IS NULL AND today_on = $2 AND done_at IS NULL`,
+		user.ID, today).Scan(&todayCount); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	data["TodayCount"] = todayCount
 	if data["Workspaces"], err = s.userWorkspaces(ctx, user.ID, 0); err != nil {
 		s.serverError(w, r, err)
 		return
@@ -143,7 +222,7 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data["Tags"] = tags
-	if data["Tasks"], err = s.taskList(ctx, user.ID, tagID); err != nil {
+	if data["Tasks"], err = s.taskList(ctx, user.ID, today, view, tagID); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
@@ -197,10 +276,10 @@ func parseDue(v string) *time.Time {
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := currentUser(r).ID
-	tagID := orZero(formID(r, "tag"))
+	view, tagID := taskView(r)
 	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
-		redirect(w, r, tasksURL(tagID, 0))
+		redirect(w, r, tasksURL(r, 0))
 		return
 	}
 	parentID := formID(r, "parent_id")
@@ -212,8 +291,14 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 			SELECT $1, id, $3 FROM tasks WHERE id = $2 AND user_id = $1 AND parent_id IS NULL RETURNING id`,
 			userID, *parentID, title).Scan(&id)
 	} else {
-		err = s.db.QueryRow(ctx, `INSERT INTO tasks (user_id, title, due_on) VALUES ($1, $2, $3) RETURNING id`,
-			userID, title, parseDue(r.FormValue("due_on"))).Scan(&id)
+		// a task added on the Today list goes straight into it
+		var todayOn *time.Time
+		if view == "today" {
+			t := localToday(r)
+			todayOn = &t
+		}
+		err = s.db.QueryRow(ctx, `INSERT INTO tasks (user_id, title, due_on, today_on) VALUES ($1, $2, $3, $4) RETURNING id`,
+			userID, title, parseDue(r.FormValue("due_on")), todayOn).Scan(&id)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		s.fail(w, r, http.StatusNotFound, "")
@@ -232,10 +317,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if parentID != nil {
-		redirect(w, r, tasksURL(tagID, *parentID))
+		redirect(w, r, tasksURL(r, *parentID))
 		return
 	}
-	redirect(w, r, tasksURL(tagID, id))
+	redirect(w, r, tasksURL(r, id))
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +335,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	redirect(w, r, tasksURL(orZero(formID(r, "tag")), id))
+	redirect(w, r, tasksURL(r, id))
 }
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +349,7 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	redirect(w, r, tasksURL(orZero(formID(r, "tag")), parentID))
+	redirect(w, r, tasksURL(r, parentID))
 }
 
 func (s *Server) addTaskTag(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +370,7 @@ func (s *Server) addTaskTag(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	redirect(w, r, tasksURL(orZero(formID(r, "tag")), id))
+	redirect(w, r, tasksURL(r, id))
 }
 
 func (s *Server) removeTaskTag(w http.ResponseWriter, r *http.Request) {
@@ -298,5 +383,52 @@ func (s *Server) removeTaskTag(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	redirect(w, r, tasksURL(orZero(formID(r, "tag")), id))
+	redirect(w, r, tasksURL(r, id))
+}
+
+// moveToToday puts the selected unfinished top-level tasks ("id", repeated) into Today, or
+// with "remove" takes them out.
+func (s *Server) moveToToday(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	var ids []int64
+	for _, v := range r.Form["id"] {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	var today *time.Time
+	if r.FormValue("remove") == "" {
+		t := localToday(r)
+		today = &t
+	}
+	if _, err := s.db.Exec(r.Context(), `UPDATE tasks SET today_on = $1
+		WHERE user_id = $2 AND id = ANY($3) AND parent_id IS NULL AND done_at IS NULL`,
+		today, currentUser(r).ID, ids); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	redirect(w, r, tasksURL(r, orZero(formID(r, "task"))))
+}
+
+// setDone checks a task off ("done" set) or reopens it. A top-level task can only be checked
+// while it is in Today, and checking it completes its subtasks; subtasks can be checked anytime.
+func (s *Server) setDone(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.ownTask(w, r)
+	if !ok {
+		return
+	}
+	args := pgx.NamedArgs{"id": id, "user": currentUser(r).ID, "today": localToday(r)}
+	query := `UPDATE tasks SET done_at = NULL WHERE id = @id AND user_id = @user`
+	if r.FormValue("done") != "" {
+		query = `WITH t AS (
+				UPDATE tasks SET done_at = now() WHERE id = @id AND user_id = @user AND done_at IS NULL
+				AND (parent_id IS NOT NULL OR today_on = @today) RETURNING id
+			)
+			UPDATE tasks SET done_at = now() WHERE parent_id IN (SELECT id FROM t) AND user_id = @user AND done_at IS NULL`
+	}
+	if _, err := s.db.Exec(r.Context(), query, args); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	redirect(w, r, tasksURL(r, orZero(formID(r, "task"))))
 }

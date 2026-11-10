@@ -108,6 +108,15 @@ func ago(loc *time.Location, t time.Time) string {
 	return t.Format("Jan 2, 2006")
 }
 
+// dict builds a map from key, value pairs, to pass several values to a template.
+func dict(kv ...any) map[string]any {
+	m := map[string]any{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[kv[i].(string)] = kv[i+1]
+	}
+	return m
+}
+
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl[name].ExecuteTemplate(w, "layout", data); err != nil {

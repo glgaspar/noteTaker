@@ -7,7 +7,7 @@ const icons = [
   "cloud", "cloud-off", "loader-circle", "bold", "italic", "strikethrough", "code", "heading-1", "heading-2",
   "heading-3", "list", "list-ordered", "list-todo", "text-quote", "square-code", "paperclip", "image", "undo-2",
   "redo-2", "minus", "arrow-left", "menu", "x", "notebook-pen", "file-plus", "folder-plus", "command", "pilcrow",
-  "chevrons-up-down", "panel-right", "settings", "user-plus", "key-round", "user-x", "user-check", "tag", "mail", "inbox", "calendar",
+  "chevrons-up-down", "panel-right", "settings", "user-plus", "key-round", "user-x", "user-check", "tag", "mail", "inbox", "calendar", "circle-check", "history",
 ];
 
 mkdirSync("static/dist/fonts", { recursive: true });

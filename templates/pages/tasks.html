@@ -3,44 +3,90 @@
 <div class="flex h-dvh flex-row-reverse">
   {{template "tasks_sidebar" .}}
 
-  <section id="list-pane" {{if and .Task .Collapsed.list}}data-collapsed{{end}} class="{{if .Task}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-96 md:border-l">
+  <section id="list-pane" {{if and .Task .Collapsed.list}}data-collapsed{{end}} class="group {{if .Task}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-96 md:border-l">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
-      {{if .TagID}}{{icon "hash" "text-faint"}}{{else}}{{icon "list-todo" "text-faint"}}{{end}}
+      {{if .TagID}}{{icon "hash" "text-faint"}}{{else if eq .View "today"}}{{icon "sun" "text-faint"}}{{else if eq .View "completed"}}{{icon "history" "text-faint"}}{{else}}{{icon "list-todo" "text-faint"}}{{end}}
       <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
       <span class="text-[12px] text-faint">{{len .Tasks}}</span>
-      <span class="ml-auto">{{if not .Task}}{{template "sidebar-toggle"}}{{end}}</span>
+      <span class="ml-auto flex items-center gap-1">
+        {{if not .View}}
+        {{/* the row checkboxes belong to this form; the button shows once one is checked */}}
+        <form id="today-form" method="post" action="/tasks/today">
+          {{template "task_filter" .}}
+          <button class="btn-secondary hidden h-7 px-2 group-has-checked:inline-flex">{{icon "sun"}} Move to Today</button>
+        </form>
+        {{end}}
+        {{if not .Task}}{{template "sidebar-toggle"}}{{end}}
+      </span>
       {{template "drawer-button"}}
     </header>
+    {{if ne .View "completed"}}
     <form method="post" action="/tasks" class="mx-2 mb-2 flex items-center gap-1 rounded-lg border border-line px-2 focus-within:border-accent">
       {{template "task_filter" .}}
       {{icon "plus" "text-faint"}}
-      <input name="title" required placeholder="Add a task" autocomplete="off" {{if not .Task}}autofocus{{end}}
+      <input name="title" required placeholder="{{if eq .View "today"}}Add a task for today{{else}}Add a task{{end}}" autocomplete="off" {{if not .Task}}autofocus{{end}}
         class="h-9 min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint">
       <input name="due_on" type="date" title="Due date" class="h-7 w-32 rounded bg-transparent text-[12px] text-muted outline-none">
     </form>
+    {{end}}
     <ul class="flex-1 space-y-px overflow-y-auto px-2 pb-4">
+      {{$day := ""}}
       {{range .Tasks}}
-      <li>
-        <a href="?{{if $.TagID}}tag={{$.TagID}}&{{end}}task={{.ID}}"
-          class="block rounded-lg px-3 py-2 transition-colors hover:bg-hover {{if and $.Task (eq .ID $.Task.ID)}}bg-selected{{end}}">
-          {{with .ParentTitle}}<div class="truncate text-[12px] text-faint">{{.}} ›</div>{{end}}
-          <div class="flex items-baseline gap-2">
-            <span class="truncate font-medium" data-task-title>{{.Title}}</span>
-            {{if .DueOn}}<span class="ml-auto shrink-0 text-[12px] {{if .Overdue $.Loc}}text-danger{{else}}text-faint{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
-          </div>
-          {{if or .Tags .Subtasks}}
-          <div class="mt-1 flex flex-wrap items-center gap-1">
-            {{if .Subtasks}}<span class="flex items-center gap-1 text-[12px] text-faint">{{icon "list" "size-3"}}{{.Subtasks}}</span>{{end}}
-            {{range .Tags}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}
-          </div>
+      {{if eq $.View "completed"}}{{$label := .DayLabel $.Today}}{{if ne $label $day}}{{$day = $label}}
+      <li class="section-label px-3 pt-4 pb-1">{{$label}}</li>
+      {{end}}{{end}}
+      <li class="flex items-start gap-1 rounded-lg pl-2 transition-colors hover:bg-hover {{if and $.Task (eq .ID $.Task.ID)}}bg-selected{{end}}">
+        {{if eq $.View "today"}}
+        {{template "task_check" (dict "Task" . "Page" $)}}
+        {{else if eq $.View "completed"}}
+        <span class="grid size-8 place-items-center text-accent">{{icon "circle-check"}}</span>
+        {{else if and (not .ParentID) (not (.InToday $.Today))}}
+        <label class="grid size-8 shrink-0 cursor-pointer place-items-center" title="Select for Today">
+          <input type="checkbox" name="id" value="{{.ID}}" form="today-form" class="size-3.5 accent-[var(--accent)]">
+        </label>
+        {{else}}<span class="size-8 shrink-0"></span>{{end}}
+        <div class="min-w-0 flex-1">
+          <a href="?{{template "task_query" $}}task={{.ID}}" class="block py-2 pr-3">
+            {{with .ParentTitle}}<div class="truncate text-[12px] text-faint">{{.}} ›</div>{{end}}
+            <div class="flex items-baseline gap-2">
+              <span class="truncate font-medium {{if and .Done (eq $.View "today")}}text-faint line-through{{end}}" data-task-title>{{.Title}}</span>
+              <span class="ml-auto flex shrink-0 items-center gap-1.5 text-[12px] text-faint">
+                {{if and (not $.View) (.InToday $.Today)}}<span class="flex items-center gap-1 text-accent">{{icon "sun" "size-3"}}Today</span>{{end}}
+                {{if and .DueOn (not .Done)}}<span class="{{if .Overdue $.Loc}}text-danger{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
+              </span>
+            </div>
+            {{if or .Tags (and .Subtasks (not .Subs))}}
+            <div class="mt-1 flex flex-wrap items-center gap-1">
+              {{if and .Subtasks (not .Subs)}}<span class="flex items-center gap-1 text-[12px] text-faint">{{icon "list" "size-3"}}{{.Subtasks}}</span>{{end}}
+              {{range .Tags}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}
+            </div>
+            {{end}}
+          </a>
+          {{with .Subs}}
+          <ul class="-mt-1 pb-1.5">
+            {{range .}}
+            <li class="flex items-center gap-1">
+              {{template "task_check" (dict "Task" . "Page" $)}}
+              <a href="?{{template "task_query" $}}task={{.ID}}" class="min-w-0 flex-1 truncate text-[13px] {{if .Done}}text-faint line-through{{else}}text-muted{{end}}">{{.Title}}</a>
+            </li>
+            {{end}}
+          </ul>
           {{end}}
-        </a>
+        </div>
       </li>
       {{else}}
       <li class="flex flex-col items-center px-6 py-16 text-center">
-        <span class="mb-3 grid size-10 place-items-center rounded-full bg-hover text-faint">{{icon "list-todo" "size-5"}}</span>
+        <span class="mb-3 grid size-10 place-items-center rounded-full bg-hover text-faint">{{if eq .View "today"}}{{icon "sun" "size-5"}}{{else if eq .View "completed"}}{{icon "history" "size-5"}}{{else}}{{icon "list-todo" "size-5"}}{{end}}</span>
+        {{if eq .View "today"}}
+        <p class="font-medium">Nothing planned for today</p>
+        <p class="mt-1 text-[13px] text-muted">Select tasks in <a href="/tasks" class="text-accent hover:underline">All tasks</a> and move them here.</p>
+        {{else if eq .View "completed"}}
+        <p class="font-medium">No completed tasks yet</p>
+        <p class="mt-1 text-[13px] text-muted">Tasks you check off in Today move here at the end of the day.</p>
+        {{else}}
         <p class="font-medium">Nothing to do here</p>
         <p class="mt-1 text-[13px] text-muted">Add a task above.</p>
+        {{end}}
       </li>
       {{end}}
     </ul>
@@ -49,10 +95,10 @@
   {{with .Task}}
   <section id="note-pane" class="flex min-w-0 flex-1 flex-col">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
-      <a href="/tasks{{if $.TagID}}?tag={{$.TagID}}{{end}}" class="btn-icon -ml-1.5 md:hidden" title="Back to tasks">{{icon "arrow-left"}}</a>
+      <a href="/tasks?{{template "task_query" $}}" class="btn-icon -ml-1.5 md:hidden" title="Back to tasks">{{icon "arrow-left"}}</a>
       <nav class="flex min-w-0 items-center gap-1 text-[13px] text-muted">
-        <a href="/tasks" class="truncate hover:text-ink">Tasks</a>
-        {{if .ParentID}}{{icon "chevron-right" "size-3 text-faint"}}<a href="?{{if $.TagID}}tag={{$.TagID}}&{{end}}task={{.ParentID}}" class="truncate hover:text-ink">{{.ParentTitle}}</a>{{end}}
+        <a href="/tasks?{{template "task_query" $}}" class="truncate hover:text-ink">{{$.ListTitle}}</a>
+        {{if .ParentID}}{{icon "chevron-right" "size-3 text-faint"}}<a href="?{{template "task_query" $}}task={{.ParentID}}" class="truncate hover:text-ink">{{.ParentTitle}}</a>{{end}}
       </nav>
       <div class="ml-auto flex items-center gap-2">
         <form method="post" action="/tasks/{{.ID}}/delete" hx-confirm="“{{.Title}}”{{if .Subtasks}} and its subtasks{{end}} will be deleted.">
@@ -68,14 +114,38 @@
 
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto max-w-2xl px-5 pb-24 pt-6 sm:px-12 sm:pt-8">
+        <div class="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+          {{if or .ParentID .Done (.InToday $.Today)}}
+          <form method="post" action="/tasks/{{.ID}}/done">
+            {{template "task_filter" $}}
+            <label class="btn-secondary h-7 cursor-pointer px-2">
+              <input type="checkbox" name="done" value="1" {{if .Done}}checked{{end}} data-autosubmit class="size-3.5 accent-[var(--accent)]">
+              {{if .Done}}Done{{else}}Mark done{{end}}
+            </label>
+          </form>
+          {{end}}
+          {{if and (not .ParentID) (not .Done)}}
+          <form method="post" action="/tasks/today">
+            {{template "task_filter" $}}
+            <input type="hidden" name="id" value="{{.ID}}">
+            {{if .InToday $.Today}}
+            <input type="hidden" name="remove" value="1">
+            <button class="btn-ghost h-7 px-2 text-accent" title="Move back to All tasks">{{icon "sun"}} In Today {{icon "x" "size-3"}}</button>
+            {{else}}
+            <button class="btn-secondary h-7 px-2">{{icon "sun"}} Move to Today</button>
+            {{end}}
+          </form>
+          {{end}}
+          {{if and .Done (not .ParentID) (not (.InToday $.Today))}}<span class="text-faint">Completed {{.DayLabel $.Today}}</span>{{end}}
+        </div>
         <form method="post" action="/tasks/{{.ID}}" id="task-form">
           {{template "task_filter" $}}
           <input name="title" value="{{.Title}}" required autocomplete="off" aria-label="Title"
-            class="w-full bg-transparent text-[24px] font-bold leading-tight tracking-tight outline-none sm:text-[28px]">
+            class="w-full bg-transparent text-[24px] font-bold leading-tight tracking-tight outline-none sm:text-[28px] {{if .Done}}text-muted line-through{{end}}">
           <label class="mt-4 flex items-center gap-2 text-[13px] text-muted">
             {{icon "calendar" "text-faint"}} Due
             <input name="due_on" type="date" value="{{with .DueOn}}{{.Format "2006-01-02"}}{{end}}" class="input h-8 w-auto">
-            {{if .DueOn}}<span class="{{if .Overdue $.Loc}}text-danger{{else}}text-faint{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
+            {{if .DueOn}}<span class="{{if and (.Overdue $.Loc) (not .Done)}}text-danger{{else}}text-faint{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
           </label>
           <textarea name="details" rows="5" placeholder="Details" aria-label="Details"
             class="input mt-4 h-auto resize-y py-2">{{.Details}}</textarea>
@@ -103,10 +173,11 @@
         <h2 class="section-label mt-8 mb-2 px-0">Subtasks</h2>
         <ul class="space-y-px">
           {{range $.Subtasks}}
-          <li>
-            <a href="?{{if $.TagID}}tag={{$.TagID}}&{{end}}task={{.ID}}" class="nav-item h-auto py-1.5">
-              {{icon "chevron-right" "text-faint"}}<span class="min-w-0 flex-1 truncate">{{.Title}}</span>
-              {{if .DueOn}}<span class="text-[12px] {{if .Overdue $.Loc}}text-danger{{else}}text-faint{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
+          <li class="flex items-center gap-1 rounded-md hover:bg-hover">
+            {{template "task_check" (dict "Task" . "Page" $)}}
+            <a href="?{{template "task_query" $}}task={{.ID}}" class="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-[13.5px]">
+              <span class="min-w-0 flex-1 truncate {{if .Done}}text-faint line-through{{end}}">{{.Title}}</span>
+              {{if and .DueOn (not .Done)}}<span class="text-[12px] {{if .Overdue $.Loc}}text-danger{{else}}text-faint{{end}}">{{.DueLabel $.Loc}}</span>{{end}}
             </a>
           </li>
           {{end}}
@@ -131,7 +202,19 @@
 </div>
 {{end}}
 
-{{define "task_filter"}}{{if .TagID}}<input type="hidden" name="tag" value="{{.TagID}}">{{end}}{{end}}
+{{/* hidden fields that keep the current list (and open task) across a form post */}}
+{{define "task_filter"}}{{if .View}}<input type="hidden" name="view" value="{{.View}}">{{end}}{{if .TagID}}<input type="hidden" name="tag" value="{{.TagID}}">{{end}}{{with .Task}}<input type="hidden" name="task" value="{{.ID}}">{{end}}{{end}}
+
+{{/* the query string of the current list, ending in "&" when not empty */}}
+{{define "task_query"}}{{if .View}}view={{.View}}&{{end}}{{if .TagID}}tag={{.TagID}}&{{end}}{{end}}
+
+{{/* a checkbox that checks off .Task; .Page is the page data */}}
+{{define "task_check"}}
+<form method="post" action="/tasks/{{.Task.ID}}/done" class="grid size-8 shrink-0 place-items-center">
+  {{template "task_filter" .Page}}
+  <input type="checkbox" name="done" value="1" {{if .Task.Done}}checked{{end}} data-autosubmit aria-label="Done" class="size-4 cursor-pointer accent-[var(--accent)]">
+</form>
+{{end}}
 
 {{define "tasks_sidebar"}}
 <aside id="sidebar" {{if .Collapsed.sidebar}}data-collapsed{{end}} class="peer fixed inset-y-0 right-0 z-40 flex w-72 translate-x-full flex-col border-l border-line bg-panel transition-transform duration-200 data-open:translate-x-0 md:static md:z-auto md:w-64 md:shrink-0 md:translate-x-0 md:transition-none">
@@ -144,7 +227,10 @@
   </div>
 
   <nav class="space-y-px px-2">
-    <a href="/tasks" class="nav-item" {{if not .TagID}}aria-current="page"{{end}}>{{icon "list-todo"}} All tasks</a>
+    <a href="/tasks" class="nav-item" {{if not (or .View .TagID)}}aria-current="page"{{end}}>{{icon "list-todo"}} All tasks</a>
+    <a href="/tasks?view=today" class="nav-item" {{if eq .View "today"}}aria-current="page"{{end}}>{{icon "sun"}} Today
+      {{if .TodayCount}}<span class="ml-auto text-[12px] text-faint">{{.TodayCount}}</span>{{end}}</a>
+    <a href="/tasks?view=completed" class="nav-item" {{if eq .View "completed"}}aria-current="page"{{end}}>{{icon "history"}} Completed</a>
   </nav>
 
   <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-2 pb-4">

@@ -60,7 +60,7 @@ func New(cfg Config) (*Server, error) {
 		importSlots:  make(chan struct{}, importsAtOnce),
 	}
 	s.tmpl = parseTemplates(template.FuncMap{
-		"asset": s.assetURL, "local": local, "icon": s.icon, "initials": initials, "color": avatarColor, "ago": ago,
+		"asset": s.assetURL, "local": local, "icon": s.icon, "initials": initials, "color": avatarColor, "ago": ago, "dict": dict,
 	})
 	return s, nil
 }
@@ -124,7 +124,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /notes/{id}/tags/{tag}/delete", auth(s.removeTag))
 	mux.Handle("GET /tasks", auth(s.tasksPage))
 	mux.Handle("POST /tasks", auth(s.createTask))
+	mux.Handle("POST /tasks/today", auth(s.moveToToday))
 	mux.Handle("POST /tasks/{id}", auth(s.updateTask))
+	mux.Handle("POST /tasks/{id}/done", auth(s.setDone))
 	mux.Handle("POST /tasks/{id}/delete", auth(s.deleteTask))
 	mux.Handle("POST /tasks/{id}/tags", auth(s.addTaskTag))
 	mux.Handle("POST /tasks/{id}/tags/{tag}/delete", auth(s.removeTaskTag))
