@@ -179,6 +179,10 @@ func TestInboxTriage(t *testing.T) {
 			return 200, `{"kind": "noise", "reason": "marketing"}`
 		case strings.Contains(user, "newsletter"):
 			return 200, `{"kind": "noise", "reason": "newsletter", "title": "Read the weekly newsletter"}`
+		case strings.Contains(user, "Reminder: invoice 77"):
+			return 200, fmt.Sprintf(`{"kind": "repeat", "parent": "I%d", "reason": "same invoice reminder", "title": "Pay invoice 77"}`, invoice)
+		case strings.Contains(user, "made-up repeat"):
+			return 200, `{"kind": "repeat", "parent": "I999999", "title": "Real work"}`
 		case strings.Contains(user, "Re: invoice 77"):
 			return 200, fmt.Sprintf(`{"kind": "task", "parent": "I%d", "title": "Pay to the new account", "subtasks": ["dropped"]}`, invoice)
 		case strings.Contains(user, "invoice 77"):
@@ -212,6 +216,14 @@ func TestInboxTriage(t *testing.T) {
 	news := arrive("The weekly newsletter is here")
 	invoice = arrive("Please pay invoice 77")
 	reply := arrive("Re: invoice 77, we changed banks")
+	// a repeat is filtered out, unless what it repeats doesn't exist
+	reminder := arrive("Reminder: invoice 77 is due")
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND verdict = 'noise' AND reason = 'same invoice reminder' AND parent_item_id IS NULL`, reminder); n != 1 {
+		t.Error("the reminder should be filtered out as a repeat")
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND verdict = 'task'`, arrive("a made-up repeat")); n != 1 {
+		t.Error("a repeat of something that isn't there should stay a task")
+	}
 	arrive("The login still broken on Safari")
 	sneaky := arrive("sneaky one")
 
@@ -228,11 +240,11 @@ func TestInboxTriage(t *testing.T) {
 
 	// noise is filtered out: not counted, shown apart, restorable
 	body := ann.get("/tasks?view=inbox").body
-	if !strings.Contains(body, "2 filtered out") || !strings.Contains(body, "newsletter") {
+	if !strings.Contains(body, "3 filtered out") || !strings.Contains(body, "newsletter") {
 		t.Error("the filtered-out item should be listed apart with its reason")
 	}
-	if !strings.Contains(body, `3 to decide on`) {
-		t.Error("want 3 items to decide on: the invoice (with its reply), the Safari case and the sneaky one")
+	if !strings.Contains(body, `4 to decide on`) {
+		t.Error("want 4 items to decide on: the invoice (with its reply), the Safari case, the sneaky one and the made-up repeat")
 	}
 	if !strings.Contains(body, "Adds a subtask to “Fix the login bug”") {
 		t.Error("the Safari item should say which task it adds to")

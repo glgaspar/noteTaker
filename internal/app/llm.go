@@ -71,9 +71,9 @@ func (c LLMConfig) chat(ctx context.Context, system, user string) (string, error
 const taskPrompt = `You sort what a person received (an email, a webhook call, an API record) before it reaches their to-do inbox. They receive far too much and want to see only what they have to act on.
 Answer with JSON only, no markdown, exactly in this shape:
 {"kind": "task", "reason": "", "parent": "", "title": "", "details": "", "due": "", "tags": [], "subtasks": []}
-- kind: "task" when the person has to do something about it (reply, decide, pay, fix, attend, review, deliver). "noise" when not: newsletters, marketing, automatic notifications and receipts, FYIs and copies that need no action, confirmations of things already done. When unsure, "task".
-- reason: for noise, a few words on why (for example "newsletter" or "automatic build notification"); otherwise "".
-- parent: when this is clearly part of, a follow-up to or a reply about one of the open tasks or inbox items listed below, its code (for example "T12" or "I40"); otherwise "".
+- kind: "task" when the person has to do something about it (reply, decide, pay, fix, attend, review, deliver). "noise" when not: newsletters, marketing, automatic notifications and receipts, FYIs and copies that need no action, confirmations of things already done. "repeat" when it asks for the same thing as one of the open tasks or inbox items listed below and adds nothing new to do (a reminder, a resent alert, a duplicate). When unsure, "task".
+- reason: for noise or a repeat, a few words on why (for example "newsletter", "automatic build notification" or "same Sanofi portal alert again"); otherwise "".
+- parent: for a repeat, the code of what it repeats. For a task that is clearly a new step in, a follow-up to or a reply about one of the open tasks or inbox items listed below, its code (for example "T12" or "I40"). Otherwise "".
 - title: always, even for noise: the action to take, short and imperative (at most 80 characters), in the language of the message.
 - details: the context needed to do it (who, what, amounts, links, references), brief plain text. Empty if the title says it all.
 - due: a deadline as YYYY-MM-DD, only if the message states or clearly implies one; otherwise "".
@@ -117,6 +117,7 @@ type reading struct {
 	suggestion
 	Tags, Subtasks []string
 	Noise          bool
+	Repeat         bool // noise because it repeats its parent
 	Reason         string
 	ParentTask     int64 // an open task it belongs to
 	ParentItem     int64 // or another inbox item
@@ -147,7 +148,13 @@ func (c LLMConfig) readTask(ctx context.Context, raw string, tc triageContext) (
 	}
 	rd := reading{suggestion: suggestion{Title: strings.TrimSpace(out.Title), Details: strings.TrimSpace(out.Details), DueOn: parseDue(out.Due)},
 		Tags: cleanList(out.Tags, 3, true), Subtasks: cleanList(out.Subtasks, 5, false),
-		Noise: strings.EqualFold(strings.TrimSpace(out.Kind), "noise"), Reason: strings.TrimSpace(out.Reason)}
+		Reason: strings.TrimSpace(out.Reason)}
+	switch strings.ToLower(strings.TrimSpace(out.Kind)) {
+	case "noise":
+		rd.Noise = true
+	case "repeat":
+		rd.Noise, rd.Repeat = true, true
+	}
 	if r := []rune(rd.Title); len(r) > 200 {
 		rd.Title = string(r[:200]) + "…"
 	}
@@ -299,6 +306,18 @@ func (s *Server) readItem(ctx context.Context, id, userID int64, raw string, sou
 		}
 		_, dberr := s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'failed', parse_error = $2 WHERE id = $1`, id, msg)
 		return dberr
+	}
+	if rd.Repeat { // only a repeat of something that is really there is filtered out
+		var exists bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT FROM tasks WHERE id = $2 AND user_id = $1 AND done_at IS NULL)
+			OR EXISTS (SELECT FROM inbox_items WHERE id = $3 AND id <> $4 AND user_id = $1 AND status = 'new' AND verdict = 'task')`,
+			userID, rd.ParentTask, rd.ParentItem, id).Scan(&exists); err != nil {
+			return err
+		}
+		rd.Noise = exists
+		if rd.Reason == "" {
+			rd.Reason = "repeat"
+		}
 	}
 	verdict := map[bool]string{false: "task", true: "noise"}[rd.Noise]
 	// A parent must still be open and top-level, and an item with items of its own under it
