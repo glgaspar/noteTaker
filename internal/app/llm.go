@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,51 +68,108 @@ func (c LLMConfig) chat(ctx context.Context, system, user string) (string, error
 	return out.Choices[0].Message.Content, nil
 }
 
-const taskPrompt = `You turn something a person received (an email, a webhook call, an API record) into one item for their to-do list.
+const taskPrompt = `You sort what a person received (an email, a webhook call, an API record) before it reaches their to-do inbox. They receive far too much and want to see only what they have to act on.
 Answer with JSON only, no markdown, exactly in this shape:
-{"title": "", "details": "", "due": "", "tags": [], "subtasks": []}
+{"kind": "task", "reason": "", "parent": "", "title": "", "details": "", "due": "", "tags": [], "subtasks": []}
+- kind: "task" when the person has to do something about it (reply, decide, pay, fix, attend, review, deliver). "noise" when not: newsletters, marketing, automatic notifications and receipts, FYIs and copies that need no action, confirmations of things already done. When unsure, "task".
+- reason: for noise, a few words on why (for example "newsletter" or "automatic build notification"); otherwise "".
+- parent: when this is clearly part of, a follow-up to or a reply about one of the open tasks or inbox items listed below, its code (for example "T12" or "I40"); otherwise "".
 - title: the action to take, short and imperative (at most 80 characters), in the language of the message.
 - details: the context needed to do it (who, what, amounts, links, references), brief plain text. Empty if the title says it all.
-- due: a deadline as YYYY-MM-DD, only if the message states or clearly implies one; otherwise "". Today is %s.
-- tags: 0 to 3 short lowercase tags. Prefer these existing ones when they fit: %s.
-- subtasks: separate steps only when the message clearly lists them, at most 5; otherwise [].
-If nothing needs doing, still write the most useful title (for example "Read: <subject>").`
+- due: a deadline as YYYY-MM-DD, only if the message states or clearly implies one; otherwise "".
+- tags: 0 to 3 short lowercase tags. Prefer the existing ones when they fit.
+- subtasks: separate steps only when the message clearly lists them, at most 5; [] when parent is set.`
+
+// triageContext is what the model knows about the user when it reads an item.
+type triageContext struct {
+	Today     time.Time
+	Notes     string   // the user's own words on what matters
+	Tags      []string // existing tag names
+	Tasks     []string // open top-level tasks, as "T<id>: title"
+	Items     []string // other items waiting in the inbox, as "I<id>: title"
+	Accepted  []string // titles the user recently accepted
+	Discarded []string // and discarded
+}
+
+func (c triageContext) String() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Today is %s.", c.Today.Format("Monday, 2006-01-02"))
+	if c.Notes != "" {
+		fmt.Fprintf(&b, "\n\nWhat the person says matters to them (follow it):\n%s", c.Notes)
+	}
+	list := func(title string, items []string) {
+		if len(items) > 0 {
+			fmt.Fprintf(&b, "\n\n%s:\n%s", title, strings.Join(items, "\n"))
+		}
+	}
+	if len(c.Tags) > 0 {
+		fmt.Fprintf(&b, "\n\nExisting tags: %s", strings.Join(c.Tags, ", "))
+	}
+	list("Open tasks", c.Tasks)
+	list("Items already in the inbox", c.Items)
+	list("Recently accepted as tasks", c.Accepted)
+	list("Recently discarded by the person (similar things are probably noise)", c.Discarded)
+	return b.String()
+}
+
+// reading is what the model made of an item.
+type reading struct {
+	suggestion
+	Tags, Subtasks []string
+	Noise          bool
+	Reason         string
+	ParentTask     int64 // an open task it belongs to
+	ParentItem     int64 // or another inbox item
+}
 
 // maxLLMInput limits how much of an item is sent to the model.
 const maxLLMInput = 12000
 
-// readTask asks the model for a task from raw, given the user's tag names.
-func (c LLMConfig) readTask(ctx context.Context, raw string, tags []string, today time.Time) (suggestion, []string, []string, error) {
+// readTask asks the model what raw is, given what it knows about the user.
+func (c LLMConfig) readTask(ctx context.Context, raw string, tc triageContext) (reading, error) {
 	if r := []rune(raw); len(r) > maxLLMInput {
 		raw = string(r[:maxLLMInput]) + "\n[…cut]"
 	}
-	existing := "none yet"
-	if len(tags) > 0 {
-		existing = strings.Join(tags, ", ")
-	}
-	answer, err := c.chat(ctx, fmt.Sprintf(taskPrompt, today.Format("Monday, 2006-01-02"), existing), raw)
+	answer, err := c.chat(ctx, taskPrompt+"\n\n"+tc.String(), raw)
 	if err != nil {
-		return suggestion{}, nil, nil, err
+		return reading{}, err
 	}
 	start, end := strings.Index(answer, "{"), strings.LastIndex(answer, "}")
 	if start < 0 || end < start {
-		return suggestion{}, nil, nil, fmt.Errorf("the model answered without JSON: %.200s", answer)
+		return reading{}, fmt.Errorf("the model answered without JSON: %.200s", answer)
 	}
 	var out struct {
-		Title, Details, Due string
-		Tags, Subtasks      []string
+		Kind, Reason, Parent, Title, Details, Due string
+		Tags, Subtasks                            []string
 	}
 	if err := json.Unmarshal([]byte(answer[start:end+1]), &out); err != nil {
-		return suggestion{}, nil, nil, fmt.Errorf("the model's JSON is invalid: %v", err)
+		return reading{}, fmt.Errorf("the model's JSON is invalid: %v", err)
 	}
-	sg := suggestion{Title: strings.TrimSpace(out.Title), Details: strings.TrimSpace(out.Details), DueOn: parseDue(out.Due)}
-	if sg.Title == "" {
-		return suggestion{}, nil, nil, errors.New("the model gave no title")
+	rd := reading{suggestion: suggestion{Title: strings.TrimSpace(out.Title), Details: strings.TrimSpace(out.Details), DueOn: parseDue(out.Due)},
+		Tags: cleanList(out.Tags, 3, true), Subtasks: cleanList(out.Subtasks, 5, false),
+		Noise: strings.EqualFold(strings.TrimSpace(out.Kind), "noise"), Reason: strings.TrimSpace(out.Reason)}
+	if rd.Title == "" {
+		return reading{}, errors.New("the model gave no title")
 	}
-	if r := []rune(sg.Title); len(r) > 200 {
-		sg.Title = string(r[:200]) + "…"
+	if r := []rune(rd.Title); len(r) > 200 {
+		rd.Title = string(r[:200]) + "…"
 	}
-	return sg, cleanList(out.Tags, 3, true), cleanList(out.Subtasks, 5, false), nil
+	if r := []rune(rd.Reason); len(r) > 100 {
+		rd.Reason = string(r[:100])
+	}
+	if p := strings.ToUpper(strings.TrimSpace(out.Parent)); len(p) > 1 {
+		id, _ := strconv.ParseInt(p[1:], 10, 64)
+		switch p[0] {
+		case 'T':
+			rd.ParentTask = id
+		case 'I':
+			rd.ParentItem = id
+		}
+	}
+	if rd.Noise || rd.ParentTask != 0 || rd.ParentItem != 0 {
+		rd.Subtasks = []string{} // subtasks are one level deep, and noise has none
+	}
+	return rd, nil
 }
 
 // cleanList trims, drops empty and repeated entries (ignoring case; the first spelling stays)
@@ -139,13 +197,14 @@ type llmSettings struct {
 	URL     string
 	Model   string
 	HasKey  bool
+	Notes   string // what the user tells the model about what matters to them
 }
 
 func (s *Server) loadLLMSettings(ctx context.Context, userID int64) (llmSettings, []byte, error) {
 	st := llmSettings{Enabled: true}
 	var key []byte
-	err := s.db.QueryRow(ctx, `SELECT enabled, api_url, model, api_key FROM llm_settings WHERE user_id = $1`, userID).
-		Scan(&st.Enabled, &st.URL, &st.Model, &key)
+	err := s.db.QueryRow(ctx, `SELECT enabled, api_url, model, api_key, notes FROM llm_settings WHERE user_id = $1`, userID).
+		Scan(&st.Enabled, &st.URL, &st.Model, &key, &st.Notes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = nil
 	}
@@ -181,6 +240,9 @@ func (s *Server) llmFor(ctx context.Context, userID int64) (cfg LLMConfig, ok bo
 func (s *Server) readInboxEvery(interval time.Duration) {
 	for {
 		if err := s.readPending(context.Background()); err != nil {
+			log.Printf("inbox reader: %v", err)
+		}
+		if err := s.expireNoise(context.Background()); err != nil {
 			log.Printf("inbox reader: %v", err)
 		}
 		select {
@@ -225,19 +287,13 @@ func (s *Server) readItem(ctx context.Context, id, userID int64, raw string, sou
 		_, err = s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'done' WHERE id = $1`, id)
 		return err
 	}
-	var sg suggestion
-	var tags, subtasks []string
+	var rd reading
 	if err == nil {
-		var names []string
-		rows, qerr := s.db.Query(ctx, `SELECT name FROM task_tags WHERE user_id = $1 ORDER BY lower(name) LIMIT 50`, userID)
-		if qerr != nil {
-			return qerr
+		tc, dberr := s.triageContext(ctx, userID, id)
+		if dberr != nil {
+			return dberr
 		}
-		if names, qerr = pgx.CollectRows(rows, pgx.RowTo[string]); qerr != nil {
-			return qerr
-		}
-		y, m, d := time.Now().Date()
-		sg, tags, subtasks, err = cfg.readTask(ctx, raw, names, time.Date(y, m, d, 0, 0, 0, 0, time.UTC))
+		rd, err = cfg.readTask(ctx, raw, tc)
 	}
 	if err != nil {
 		msg := err.Error()
@@ -247,9 +303,61 @@ func (s *Server) readItem(ctx context.Context, id, userID int64, raw string, sou
 		_, dberr := s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'failed', parse_error = $2 WHERE id = $1`, id, msg)
 		return dberr
 	}
-	_, err = s.db.Exec(ctx, `UPDATE inbox_items SET parse_state = 'done', parse_error = '',
-		title = $2, details = $3, due_on = $4, tags = $5, subtasks = $6 WHERE id = $1 AND status = 'new'`,
-		id, sg.Title, sg.Details, sg.DueOn, cleanList(append(sourceTags, tags...), len(sourceTags)+len(tags), false), subtasks)
+	verdict := map[bool]string{false: "task", true: "noise"}[rd.Noise]
+	// A parent must still be open and top-level, and an item with items of its own under it
+	// stays top-level, so everything stays one level deep. Noise lets go of items under it.
+	_, err = s.db.Exec(ctx, `
+		WITH me AS (
+			UPDATE inbox_items SET parse_state = 'done', parse_error = '', title = @title, details = @details, due_on = @due,
+				tags = @tags, subtasks = @subtasks, verdict = @verdict, reason = @reason,
+				parent_task_id = (SELECT id FROM tasks WHERE id = @ptask AND user_id = @user AND parent_id IS NULL AND done_at IS NULL AND @verdict = 'task'),
+				parent_item_id = (SELECT p.id FROM inbox_items p WHERE p.id = @pitem AND p.id <> @id AND p.user_id = @user AND p.status = 'new'
+					AND p.verdict = 'task' AND p.parent_item_id IS NULL AND @verdict = 'task'
+					AND NOT EXISTS (SELECT FROM inbox_items c WHERE c.parent_item_id = @id AND c.status = 'new'))
+			WHERE id = @id AND status = 'new' RETURNING id
+		)
+		UPDATE inbox_items SET parent_item_id = NULL WHERE parent_item_id = (SELECT id FROM me) AND @verdict = 'noise'`,
+		pgx.NamedArgs{"id": id, "user": userID, "title": rd.Title, "details": rd.Details, "due": rd.DueOn,
+			"tags": cleanList(append(sourceTags, rd.Tags...), len(sourceTags)+len(rd.Tags), false), "subtasks": rd.Subtasks,
+			"verdict": verdict, "reason": rd.Reason, "ptask": rd.ParentTask, "pitem": rd.ParentItem})
+	return err
+}
+
+// triageContext gathers what the model should know to sort item for the user.
+func (s *Server) triageContext(ctx context.Context, userID, itemID int64) (triageContext, error) {
+	y, m, d := time.Now().Date()
+	tc := triageContext{Today: time.Date(y, m, d, 0, 0, 0, 0, time.UTC)}
+	err := s.db.QueryRow(ctx, `SELECT coalesce((SELECT notes FROM llm_settings WHERE user_id = $1), '')`, userID).Scan(&tc.Notes)
+	lists := []struct {
+		into  *[]string
+		query string
+	}{
+		{&tc.Tags, `SELECT name FROM task_tags WHERE user_id = @user ORDER BY lower(name) LIMIT 50`},
+		{&tc.Tasks, `SELECT 'T' || id || ': ' || left(title, 100) FROM tasks
+			WHERE user_id = @user AND parent_id IS NULL AND done_at IS NULL ORDER BY id DESC LIMIT 80`},
+		{&tc.Items, `SELECT 'I' || id || ': ' || left(title, 100) FROM inbox_items
+			WHERE user_id = @user AND id <> @item AND status = 'new' AND parse_state = 'done' AND verdict = 'task' AND parent_item_id IS NULL
+			ORDER BY id DESC LIMIT 80`},
+		{&tc.Accepted, `SELECT left(title, 100) FROM inbox_items WHERE user_id = @user AND status = 'accepted' ORDER BY id DESC LIMIT 15`},
+		// noise that expired unseen was not the user's choice
+		{&tc.Discarded, `SELECT left(title, 100) FROM inbox_items WHERE user_id = @user AND status = 'discarded' AND verdict = 'task' ORDER BY id DESC LIMIT 15`},
+	}
+	for _, l := range lists {
+		if err != nil {
+			break
+		}
+		var rows pgx.Rows
+		if rows, err = s.db.Query(ctx, l.query, pgx.NamedArgs{"user": userID, "item": itemID}); err == nil {
+			*l.into, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+	}
+	return tc, err
+}
+
+// expireNoise discards what was filtered out and not restored within 14 days.
+func (s *Server) expireNoise(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `UPDATE inbox_items SET status = 'discarded', raw = ''
+		WHERE status = 'new' AND verdict = 'noise' AND received_at < now() - interval '14 days'`)
 	return err
 }
 
@@ -292,9 +400,13 @@ func (s *Server) saveLLMSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		key = s.secrets.seal(k)
 	}
-	if _, err := s.db.Exec(ctx, `INSERT INTO llm_settings (user_id, enabled, api_url, model, api_key) VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (user_id) DO UPDATE SET enabled = $2, api_url = $3, model = $4, api_key = $5`,
-		userID, r.FormValue("enabled") != "", apiURL, strings.TrimSpace(r.FormValue("model")), key); err != nil {
+	notes := strings.TrimSpace(r.FormValue("notes"))
+	if r := []rune(notes); len(r) > 2000 {
+		notes = string(r[:2000])
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO llm_settings (user_id, enabled, api_url, model, api_key, notes) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (user_id) DO UPDATE SET enabled = $2, api_url = $3, model = $4, api_key = $5, notes = $6`,
+		userID, r.FormValue("enabled") != "", apiURL, strings.TrimSpace(r.FormValue("model")), key, notes); err != nil {
 		s.serverError(w, r, err)
 		return
 	}

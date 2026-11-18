@@ -16,8 +16,9 @@ import (
 // records the Authorization header of each call.
 type fakeLLM struct {
 	*httptest.Server
-	mu    sync.Mutex
-	auths []string
+	mu      sync.Mutex
+	auths   []string
+	systems []string // the system prompt of each call
 }
 
 func newFakeLLM(t *testing.T, reply func(user string) (int, string)) *fakeLLM {
@@ -30,6 +31,9 @@ func newFakeLLM(t *testing.T, reply func(user string) (int, string)) *fakeLLM {
 		json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
 		f.auths = append(f.auths, r.Header.Get("Authorization"))
+		if len(req.Messages) > 0 {
+			f.systems = append(f.systems, req.Messages[0].Content)
+		}
 		f.mu.Unlock()
 		if r.URL.Path != "/api/chat/completions" || len(req.Messages) != 2 || req.Model == "" {
 			http.Error(w, "bad request", 400)
@@ -162,5 +166,126 @@ func TestSealer(t *testing.T) {
 	}
 	if newSealer("") != nil {
 		t.Error("a sealer without a secret")
+	}
+}
+
+func TestInboxTriage(t *testing.T) {
+	a := newApp(t, false)
+	ctx := context.Background()
+	var invoice, annTask, benTask int64
+	llm := newFakeLLM(t, func(user string) (int, string) {
+		switch {
+		case strings.Contains(user, "newsletter"):
+			return 200, `{"kind": "noise", "reason": "newsletter", "title": "Read the weekly newsletter"}`
+		case strings.Contains(user, "Re: invoice 77"):
+			return 200, fmt.Sprintf(`{"kind": "task", "parent": "I%d", "title": "Pay to the new account", "subtasks": ["dropped"]}`, invoice)
+		case strings.Contains(user, "invoice 77"):
+			return 200, `{"kind": "task", "title": "Pay invoice 77", "subtasks": ["Check the amount"], "tags": ["bills"]}`
+		case strings.Contains(user, "login still broken"):
+			return 200, fmt.Sprintf(`{"kind": "task", "parent": "t%d", "title": "Check the Safari case", "details": "on iOS"}`, annTask)
+		case strings.Contains(user, "sneaky"):
+			return 200, fmt.Sprintf(`{"kind": "task", "parent": "T%d", "title": "Sneaky"}`, benTask)
+		}
+		return 200, `{"kind": "task", "title": "Something else"}`
+	})
+	a.s.llm = LLMConfig{URL: llm.URL + "/api", Model: "haiku"}
+	ann, ben := a.user("Ann", false), a.user("Ben", false)
+	ann.post("/tasks/ai", url.Values{"enabled": {"1"}, "notes": {"Anything from my boss is a task."}})
+	ann.post("/tasks", url.Values{"title": {"Fix the login bug"}})
+	ben.post("/tasks", url.Values{"title": {"Ben's task"}})
+	annTask = dbInt(t, `SELECT id FROM tasks WHERE user_id = $1`, ann.ID)
+	benTask = dbInt(t, `SELECT id FROM tasks WHERE user_id = $1`, ben.ID)
+	hook := ann.hook("Mail")
+	arrive := func(text string) int64 {
+		t.Helper()
+		send(t, hook, "text/plain", text)
+		if err := a.s.readPending(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return dbInt(t, `SELECT max(id) FROM inbox_items`)
+	}
+	news := arrive("The weekly newsletter is here")
+	invoice = arrive("Please pay invoice 77")
+	reply := arrive("Re: invoice 77, we changed banks")
+	arrive("The login still broken on Safari")
+	sneaky := arrive("sneaky one")
+
+	// the model sees the open tasks, the inbox, the user's notes, and only Ann's things
+	system := llm.systems[len(llm.systems)-1]
+	for _, want := range []string{fmt.Sprintf("T%d: Fix the login bug", annTask), fmt.Sprintf("I%d: Pay invoice 77", invoice), "Anything from my boss is a task."} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(system, "Ben's task") || strings.Contains(system, "weekly newsletter") {
+		t.Error("the prompt shows another user's task or a filtered-out item")
+	}
+
+	// noise is filtered out: not counted, shown apart, restorable
+	body := ann.get("/tasks?view=inbox").body
+	if !strings.Contains(body, "1 filtered out") || !strings.Contains(body, "newsletter") {
+		t.Error("the filtered-out item should be listed apart with its reason")
+	}
+	if !strings.Contains(body, `3 to decide on`) {
+		t.Error("want 3 items to decide on: the invoice (with its reply), the Safari case and the sneaky one")
+	}
+	if !strings.Contains(body, "Adds a subtask to “Fix the login bug”") {
+		t.Error("the Safari item should say which task it adds to")
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND parent_task_id IS NULL AND parent_item_id IS NULL`, sneaky); n != 1 {
+		t.Error("an item was attached to another user's task")
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND parent_item_id = $2 AND subtasks = '{}'`, reply, invoice); n != 1 {
+		t.Error("the reply should sit under the invoice, without subtasks of its own")
+	}
+	ann.post(fmt.Sprintf("/tasks/inbox/%d/restore", news), nil)
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND verdict = 'task'`, news); n != 1 {
+		t.Error("restore did not bring the item back")
+	}
+	ann.post(fmt.Sprintf("/tasks/inbox/%d/discard", news), nil)
+
+	// accepting the invoice brings the reply along as a subtask
+	ann.post(fmt.Sprintf("/tasks/inbox/%d/accept", invoice), nil)
+	task := dbInt(t, `SELECT id FROM tasks WHERE user_id = $1 AND title = 'Pay invoice 77' AND parent_id IS NULL`, ann.ID)
+	var subs string
+	testDB.QueryRow(ctx, `SELECT string_agg(title, ',' ORDER BY id) FROM tasks WHERE parent_id = $1`, task).Scan(&subs)
+	if subs != "Check the amount,Pay to the new account" {
+		t.Errorf("subtasks %q", subs)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND status = 'accepted'`, reply); n != 1 {
+		t.Error("the reply stayed in the inbox")
+	}
+
+	// accept all: the Safari item joins the open task, untagged
+	ann.post("/tasks/inbox/accept", nil)
+	if n := dbInt(t, `SELECT count(*) FROM tasks WHERE parent_id = $1 AND title = 'Check the Safari case' AND details = 'on iOS'`, annTask); n != 1 {
+		t.Error("the Safari item should be a subtask of the login task")
+	}
+	if n := inboxCount(t, ann.ID); n != 0 {
+		t.Errorf("%d items left after accepting all", n)
+	}
+
+	// what the user accepted and discarded is fed back to the model
+	arrive("anything")
+	system = llm.systems[len(llm.systems)-1]
+	if !strings.Contains(system, "Recently accepted as tasks:\nSneaky") || !strings.Contains(system, "Recently discarded by the person (similar things are probably noise):\nRead the weekly newsletter") {
+		t.Errorf("the prompt lacks the user's recent choices:\n%s", system)
+	}
+
+	// discarding an item lets the items under it go; noise expires after 14 days
+	parent := dbInt(t, `SELECT max(id) FROM inbox_items`)
+	child := arrive("child")
+	testDB.Exec(ctx, `UPDATE inbox_items SET parent_item_id = $1 WHERE id = $2`, parent, child)
+	ann.post(fmt.Sprintf("/tasks/inbox/%d/discard", parent), nil)
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND status = 'new' AND parent_item_id IS NULL`, child); n != 1 {
+		t.Error("discarding the parent should leave the child at the top")
+	}
+	old := arrive("old newsletter")
+	testDB.Exec(ctx, `UPDATE inbox_items SET received_at = now() - interval '15 days' WHERE id = $1`, old)
+	if err := a.s.expireNoise(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE id = $1 AND status = 'discarded' AND raw = ''`, old); n != 1 {
+		t.Error("old noise was not discarded")
 	}
 }

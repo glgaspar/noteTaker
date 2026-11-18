@@ -203,7 +203,7 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 	var todayCount, inboxCount int
 	if err := s.db.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM tasks WHERE user_id = $1 AND parent_id IS NULL AND today_on = $2 AND done_at IS NULL),
-		(SELECT count(*) FROM inbox_items WHERE user_id = $1 AND status = 'new')`,
+		(SELECT count(*) FROM inbox_items WHERE user_id = $1 AND status = 'new' AND verdict = 'task' AND parse_state <> 'pending' AND parent_item_id IS NULL)`,
 		user.ID, today).Scan(&todayCount, &inboxCount); err != nil {
 		s.serverError(w, r, err)
 		return
@@ -225,7 +225,8 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data["Tags"] = tags
 	if view == "inbox" {
-		data["Items"], err = s.inboxItems(ctx, user.ID)
+		data["Inbox"], err = s.inbox(ctx, user.ID)
+		data["Sorting"] = r.FormValue("sorting") != ""
 	} else {
 		data["Tasks"], err = s.taskList(ctx, user.ID, today, view, tagID)
 	}

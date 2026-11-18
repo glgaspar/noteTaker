@@ -132,9 +132,13 @@
   <label class="flex cursor-pointer items-start gap-3">
     <input type="checkbox" name="enabled" value="1" {{if .AI.Enabled}}checked{{end}} class="mt-0.5 size-4 accent-[var(--accent)]">
     <span>
-      <span class="block font-medium">Turn new items into tasks with a language model</span>
-      <span class="text-[13px] text-muted">It writes the title, details, due date, tags and subtasks for you to review. What a source sends is passed to the model{{if .DefaultHost}}; by default that is {{.DefaultModel}} through {{.DefaultHost}}{{end}}. Without it, the title is guessed from the item.</span>
+      <span class="block font-medium">Sort new items and turn them into tasks with a language model</span>
+      <span class="text-[13px] text-muted">It filters out what needs no action (newsletters, notifications, FYIs), puts related items under the task they belong to, and writes the title, details, due date, tags and subtasks for you to review. What a source sends is passed to the model{{if .DefaultHost}}; by default that is {{.DefaultModel}} through {{.DefaultHost}}{{end}}. Without it, the title is guessed from the item.</span>
     </span>
+  </label>
+  <label class="block"><span class="label">What matters to you</span>
+    <textarea name="notes" rows="4" maxlength="2000" placeholder="e.g. Anything from my manager or a client is a task. Build and deploy notifications only matter when something failed. Ignore marketing and webinar invites." class="input h-auto py-2">{{.AI.Notes}}</textarea>
+    <span class="mt-1 block text-[12px] text-faint">Plain words the model follows when sorting. It also learns from what you accept and discard.</span>
   </label>
   {{if not .DefaultHost}}<p class="alert-warn">The server has no default model (LLM_API_URL and LLM_MODEL), so set one below.</p>{{end}}
   <div class="grid gap-3 sm:grid-cols-2">

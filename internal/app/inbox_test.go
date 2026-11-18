@@ -84,6 +84,10 @@ func TestInbox(t *testing.T) {
 		}
 	}
 
+	if body := ann.get("/tasks?view=inbox").body; !strings.Contains(body, "Sorting 2 new items") || strings.Contains(body, "Buy milk") {
+		t.Error("items not read yet should only be counted")
+	}
+	a.s.readPending(context.Background()) // no model: the guesses stay
 	body := ann.get("/tasks?view=inbox").body
 	if !strings.Contains(body, "Take out the trash") || !strings.Contains(body, "Buy milk") || !strings.Contains(body, "Home Assistant") {
 		t.Error("the inbox should list both items and their source")

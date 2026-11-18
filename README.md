@@ -84,8 +84,13 @@ moved to Today).
 Tasks can also come from **sources**, set up per user under Inbox → Sources: webhooks
 (`POST /hooks/<secret>` with JSON or text), IMAP mailboxes and JSON APIs polled on a schedule,
 any number of each. What they send waits in the Inbox to be accepted or discarded. A language
-model (`LLM_*` settings, or each user's own) turns each item into a title, details, due date,
-tags and subtasks; without one, or when it fails, the title is guessed. Mailbox passwords and
+model (`LLM_*` settings, or each user's own) sorts each item first: what needs no action
+(newsletters, notifications, receipts) is filtered out of the way and discarded after 14 days
+unless restored, and an item that belongs to an open task or to another inbox item (a reply in
+the same thread) is put under it, to become a subtask when accepted. It also writes the title,
+details, due date, tags and subtasks. It is told the user's own notes on what matters and what
+they recently accepted and discarded. Without a model, or when it fails, the title is guessed
+and nothing is filtered. Mailbox passwords and
 API headers are stored encrypted with `SECRET_KEY`. Mailboxes and APIs only import what is new
 after they were added, unless asked otherwise, and mailboxes are opened read-only.
 

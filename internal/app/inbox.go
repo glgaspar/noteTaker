@@ -60,6 +60,19 @@ type inboxItem struct {
 	Subtasks   []string
 	ParseState string
 	ParseError string
+	Noise      bool
+	Reason     string // why it was filtered out
+	ParentItem *int64
+	ParentTask string      // the title of the open task it will be added to
+	Children   []inboxItem `db:"-"` // items that will become its subtasks
+}
+
+// inbox is what the inbox shows: items to decide on, with related items under them, and what
+// the model filtered out. Items the model is still reading are only counted.
+type inbox struct {
+	Items    []inboxItem
+	Filtered []inboxItem
+	Pending  int
 }
 
 // suggestion is a task read from what a source received.
@@ -117,7 +130,8 @@ func (s *Server) addToInbox(ctx context.Context, userID, sourceID int64, raw str
 		sg.Title = string(r[:200]) + "…"
 	}
 	var full bool
-	if err := s.db.QueryRow(ctx, `SELECT count(*) >= $2 FROM inbox_items WHERE user_id = $1 AND status = 'new'`,
+	// filtered-out noise doesn't count: it expires by itself
+	if err := s.db.QueryRow(ctx, `SELECT count(*) >= $2 FROM inbox_items WHERE user_id = $1 AND status = 'new' AND verdict = 'task'`,
 		userID, inboxMax).Scan(&full); err != nil {
 		return err
 	}
@@ -175,67 +189,157 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) inboxItems(ctx context.Context, userID int64) ([]inboxItem, error) {
+func (s *Server) inbox(ctx context.Context, userID int64) (inbox, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT i.id, s.name, i.raw, i.title, i.details, i.due_on, i.received_at, i.tags, i.subtasks, i.parse_state, i.parse_error
+		SELECT i.id, s.name, i.raw, i.title, i.details, i.due_on, i.received_at, i.tags, i.subtasks, i.parse_state, i.parse_error,
+			i.verdict = 'noise', i.reason, i.parent_item_id,
+			coalesce((SELECT t.title FROM tasks t WHERE t.id = i.parent_task_id AND t.done_at IS NULL AND t.parent_id IS NULL), '')
 		FROM inbox_items i JOIN task_sources s ON s.id = i.source_id
 		WHERE i.user_id = $1 AND i.status = 'new' ORDER BY i.received_at DESC, i.id DESC`, userID)
 	if err != nil {
-		return nil, err
+		return inbox{}, err
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[inboxItem])
+	all, err := pgx.CollectRows(rows, pgx.RowToStructByPos[inboxItem])
+	if err != nil {
+		return inbox{}, err
+	}
+	var in inbox
+	top := map[int64]int{} // item id -> index in in.Items
+	for _, it := range all {
+		switch {
+		case it.ParseState == "pending":
+			in.Pending++
+		case it.Noise:
+			in.Filtered = append(in.Filtered, it)
+		case it.ParentItem == nil:
+			top[it.ID] = len(in.Items)
+			in.Items = append(in.Items, it)
+		}
+	}
+	for _, it := range all {
+		if it.ParseState != "pending" && !it.Noise && it.ParentItem != nil {
+			if i, ok := top[*it.ParentItem]; ok {
+				in.Items[i].Children = append(in.Items[i].Children, it)
+			} else {
+				in.Items = append(in.Items, it)
+			}
+		}
+	}
+	return in, nil
 }
 
-// acceptItem turns an inbox item into a task, with the title the user may have edited, and
-// the subtasks and tags the model suggested.
-func (s *Server) acceptItem(w http.ResponseWriter, r *http.Request) {
+// accept turns a top-level inbox item into a task, with the title the user may have edited,
+// the subtasks and tags the model suggested, and the items under it as subtasks. An item that
+// belongs to an open task becomes one of its subtasks instead, and so do the items under it.
+func accept(ctx context.Context, tx pgx.Tx, userID, itemID int64, title string) error {
+	var taskID int64
+	var parentID *int64
+	var tags, subtasks []string
+	err := tx.QueryRow(ctx, `
+		WITH i AS (
+			UPDATE inbox_items i SET status = 'accepted', raw = ''
+			WHERE id = @id AND user_id = @user AND status = 'new' AND verdict = 'task' AND parent_item_id IS NULL
+			RETURNING title, details, due_on, tags, subtasks, (SELECT t.id FROM tasks t
+				WHERE t.id = i.parent_task_id AND t.user_id = @user AND t.parent_id IS NULL AND t.done_at IS NULL) AS parent
+		)
+		INSERT INTO tasks (user_id, parent_id, title, details, due_on)
+		SELECT @user, parent, coalesce(nullif(@title, ''), title), details, due_on FROM i
+		RETURNING id, parent_id, (SELECT tags FROM i), (SELECT subtasks FROM i)`,
+		pgx.NamedArgs{"id": itemID, "user": userID, "title": strings.TrimSpace(title)}).Scan(&taskID, &parentID, &tags, &subtasks)
+	if err != nil {
+		return err
+	}
+	under := taskID
+	if parentID != nil {
+		under, tags = *parentID, nil
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO tasks (user_id, parent_id, title) SELECT $1, $2, unnest($3::text[])`, userID, under, subtasks); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `
+		WITH c AS (
+			UPDATE inbox_items SET status = 'accepted', raw = '' WHERE parent_item_id = $3 AND user_id = $1 AND status = 'new'
+			RETURNING id, title, details, due_on
+		)
+		INSERT INTO tasks (user_id, parent_id, title, details, due_on) SELECT $1, $2, title, details, due_on FROM c ORDER BY id`,
+		userID, under, itemID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		WITH g AS (
+			INSERT INTO task_tags (user_id, name) SELECT $1, unnest($3::text[])
+			ON CONFLICT (user_id, name) DO UPDATE SET name = excluded.name RETURNING id
+		)
+		INSERT INTO task_tag_links (user_id, task_id, tag_id) SELECT $1, $2, id FROM g`, userID, taskID, tags)
+	return err
+}
+
+// inTx runs f in a transaction and then goes back to the inbox; no rows means not found.
+func (s *Server) inTx(w http.ResponseWriter, r *http.Request, f func(pgx.Tx) error) {
 	ctx := r.Context()
-	userID := currentUser(r).ID
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 	defer tx.Rollback(ctx)
-	var taskID int64
-	var tags, subtasks []string
-	err = tx.QueryRow(ctx, `
-		WITH i AS (
-			UPDATE inbox_items SET status = 'accepted', raw = '' WHERE id = @id AND user_id = @user AND status = 'new'
-			RETURNING title, details, due_on, tags, subtasks
-		)
-		INSERT INTO tasks (user_id, title, details, due_on)
-		SELECT @user, coalesce(nullif(@title, ''), title), details, due_on FROM i
-		RETURNING id, (SELECT tags FROM i), (SELECT subtasks FROM i)`,
-		pgx.NamedArgs{"id": pathID(r, "id"), "user": userID, "title": strings.TrimSpace(r.FormValue("title"))}).Scan(&taskID, &tags, &subtasks)
-	if errors.Is(err, pgx.ErrNoRows) {
-		s.fail(w, r, http.StatusNotFound, "")
-		return
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO tasks (user_id, parent_id, title) SELECT $1, $2, unnest($3::text[])`, userID, taskID, subtasks)
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `
-			WITH g AS (
-				INSERT INTO task_tags (user_id, name) SELECT $1, unnest($3::text[])
-				ON CONFLICT (user_id, name) DO UPDATE SET name = excluded.name RETURNING id
-			)
-			INSERT INTO task_tag_links (user_id, task_id, tag_id) SELECT $1, $2, id FROM g`, userID, taskID, tags)
-	}
-	if err == nil {
+	if err = f(tx); err == nil {
 		err = tx.Commit(ctx)
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		s.fail(w, r, http.StatusNotFound, "")
+	case err != nil:
 		s.serverError(w, r, err)
-		return
+	default:
+		redirect(w, r, "/tasks?view=inbox")
 	}
-	redirect(w, r, "/tasks?view=inbox")
 }
 
+func (s *Server) acceptItem(w http.ResponseWriter, r *http.Request) {
+	s.inTx(w, r, func(tx pgx.Tx) error {
+		return accept(r.Context(), tx, currentUser(r).ID, pathID(r, "id"), r.FormValue("title"))
+	})
+}
+
+// acceptAll accepts every item the model has read and kept, with what's under them.
+func (s *Server) acceptAll(w http.ResponseWriter, r *http.Request) {
+	ctx, userID := r.Context(), currentUser(r).ID
+	s.inTx(w, r, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id FROM inbox_items WHERE user_id = $1 AND status = 'new' AND verdict = 'task'
+			AND parse_state = 'done' AND parent_item_id IS NULL ORDER BY id`, userID)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		for _, id := range ids {
+			if err == nil {
+				err = accept(ctx, tx, userID, id, "")
+			}
+		}
+		return err
+	})
+}
+
+// discardItem drops an item; items under it go back to the top of the inbox.
 func (s *Server) discardItem(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.db.Exec(r.Context(), `UPDATE inbox_items SET status = 'discarded', raw = ''
-		WHERE id = $1 AND user_id = $2 AND status = 'new'`, pathID(r, "id"), currentUser(r).ID); err != nil {
+	s.inboxUpdate(w, r, `
+		WITH d AS (UPDATE inbox_items SET status = 'discarded', raw = '' WHERE id = $1 AND user_id = $2 AND status = 'new' RETURNING id)
+		UPDATE inbox_items SET parent_item_id = NULL WHERE parent_item_id = (SELECT id FROM d)`)
+}
+
+// restoreItem brings back an item the model filtered out.
+func (s *Server) restoreItem(w http.ResponseWriter, r *http.Request) {
+	s.inboxUpdate(w, r, `UPDATE inbox_items SET verdict = 'task', reason = '' WHERE id = $1 AND user_id = $2 AND status = 'new'`)
+}
+
+// detachItem makes an item its own task instead of a subtask of another.
+func (s *Server) detachItem(w http.ResponseWriter, r *http.Request) {
+	s.inboxUpdate(w, r, `UPDATE inbox_items SET parent_item_id = NULL, parent_task_id = NULL WHERE id = $1 AND user_id = $2 AND status = 'new'`)
+}
+
+func (s *Server) inboxUpdate(w http.ResponseWriter, r *http.Request, query string) {
+	if _, err := s.db.Exec(r.Context(), query, pathID(r, "id"), currentUser(r).ID); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
