@@ -110,8 +110,8 @@ func TestInboxAI(t *testing.T) {
 	if state, title := itemState(t, id); state != "failed" || title != "This one breaks the model" {
 		t.Errorf("after a failure: %s %q", state, title)
 	}
-	if body := ann.get("/tasks?view=inbox").body; !strings.Contains(body, "answered 503") || !strings.Contains(body, "Retry") {
-		t.Error("the inbox should show the model's error and a retry button")
+	if body := ann.get(fmt.Sprintf("/tasks?view=inbox&item=%d", id)).body; !strings.Contains(body, "answered 503") || !strings.Contains(body, "Retry") {
+		t.Error("the opened item should show the model's error and a retry button")
 	}
 	ann.post(fmt.Sprintf("/tasks/inbox/%d/retry", id), nil)
 	if state, _ := itemState(t, id); state != "pending" {

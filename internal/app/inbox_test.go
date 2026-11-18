@@ -95,7 +95,14 @@ func TestInbox(t *testing.T) {
 	trash := dbInt(t, `SELECT id FROM inbox_items WHERE external_id = 'a1'`)
 	milk := dbInt(t, `SELECT id FROM inbox_items WHERE title = 'Buy milk'`)
 
-	// another user can't act on Ann's items or sources
+	if body := ann.get(fmt.Sprintf("/tasks?view=inbox&item=%d", trash)).body; !strings.Contains(body, "it&#39;s Tuesday") || !strings.Contains(body, "What was received") {
+		t.Error("an opened item should show its details and what was received")
+	}
+
+	// another user can't see or act on Ann's items or sources
+	if res := ben.get(fmt.Sprintf("/tasks?view=inbox&item=%d", trash)); res.code != http.StatusNotFound {
+		t.Errorf("Ben opening Ann's item: %d", res.code)
+	}
 	if res := ben.post(fmt.Sprintf("/tasks/inbox/%d/accept", trash), nil); res.code != http.StatusNotFound {
 		t.Errorf("Ben accepting Ann's item: %d", res.code)
 	}

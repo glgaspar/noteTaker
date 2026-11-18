@@ -3,7 +3,8 @@
 <div class="flex h-dvh flex-row-reverse">
   {{template "tasks_sidebar" .}}
 
-  <section id="list-pane" {{if and .Task .Collapsed.list}}data-collapsed{{end}} class="group {{if .Task}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-96 md:border-l">
+  {{$open := or .Task .Item}}
+  <section id="list-pane" {{if and $open .Collapsed.list}}data-collapsed{{end}} class="group {{if $open}}hidden md:flex{{else}}flex{{end}} w-full shrink-0 flex-col border-line md:w-96 md:border-l">
     <header class="flex h-12 shrink-0 items-center gap-2 px-4">
       {{if .TagID}}{{icon "hash" "text-faint"}}{{else if eq .View "inbox"}}{{icon "inbox" "text-faint"}}{{else if eq .View "today"}}{{icon "sun" "text-faint"}}{{else if eq .View "completed"}}{{icon "history" "text-faint"}}{{else}}{{icon "list-todo" "text-faint"}}{{end}}
       <h1 class="truncate text-[15px] font-semibold">{{.ListTitle}}</h1>
@@ -17,7 +18,7 @@
           <button class="btn-secondary hidden h-7 px-2 group-has-checked:inline-flex">{{icon "sun"}} Move to Today</button>
         </form>
         {{end}}
-        {{if not .Task}}{{template "sidebar-toggle"}}{{end}}
+        {{if not $open}}{{template "sidebar-toggle"}}{{end}}
       </span>
       {{template "drawer-button"}}
     </header>
@@ -116,7 +117,7 @@
     </header>
 
     <div class="flex-1 overflow-y-auto">
-      <div class="mx-auto max-w-2xl px-5 pb-24 pt-6 sm:px-12 sm:pt-8">
+      <div class="px-5 pb-24 pt-6 sm:px-12 sm:pt-8">
         <div class="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
           {{if or .ParentID .Done (.InToday $.Today)}}
           <form method="post" action="/tasks/{{.ID}}/done">
@@ -195,11 +196,18 @@
       </div>
     </div>
   </section>
+  {{else with .Item}}{{template "inbox_pane" dict "Item" . "Loc" $.Loc}}
   {{else}}
   <section class="hidden flex-1 flex-col items-center justify-center text-center md:flex">
+    {{if eq .View "inbox"}}
+    <span class="mb-3 grid size-12 place-items-center rounded-full bg-hover text-faint">{{icon "inbox" "size-6"}}</span>
+    <p class="font-medium">Select an item</p>
+    <p class="mt-1 text-[13px] text-muted">to read everything that was received</p>
+    {{else}}
     <span class="mb-3 grid size-12 place-items-center rounded-full bg-hover text-faint">{{icon "list-todo" "size-6"}}</span>
     <p class="font-medium">Select a task</p>
     <p class="mt-1 text-[13px] text-muted">to add details, a due date, tags or subtasks</p>
+    {{end}}
   </section>
   {{end}}
 </div>
@@ -241,7 +249,7 @@
     <button class="btn-ghost h-7 px-2">{{icon "check-check"}} Accept all</button>
   </form>
   <ul class="divide-y divide-line">
-    {{range .Inbox.Items}}{{template "inbox_item" dict "Item" . "Loc" $.Loc}}{{end}}
+    {{range .Inbox.Items}}{{template "inbox_item" dict "Item" . "Loc" $.Loc "Open" $.Item}}{{end}}
   </ul>
   {{else if not .Inbox.Pending}}
   <div class="flex flex-col items-center px-6 py-16 text-center">
@@ -256,15 +264,12 @@
     <summary class="cursor-pointer py-1 text-[12px] text-faint select-none">{{len .}} filtered out as needing no action · each goes away after 14 days</summary>
     <ul class="divide-y divide-line">
       {{range .}}
-      <li class="py-2">
-        <div class="flex items-center gap-2">
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-[13px] text-muted">{{.Title}}</p>
-            <p class="truncate text-[12px] text-faint">{{.Source}} · {{ago $.Loc .ReceivedAt}}{{with .Reason}} · {{.}}{{end}}</p>
-          </div>
-          <form method="post" action="/tasks/inbox/{{.ID}}/restore"><button class="btn-ghost h-7 px-2 text-[12px]" title="Put it back in the inbox">Restore</button></form>
-        </div>
-        {{template "inbox_raw" .}}
+      <li class="-mx-2 flex items-center gap-2 rounded-md px-2 py-2 hover:bg-hover {{if and $.Item (eq .ID $.Item.ID)}}bg-selected{{end}}">
+        <a href="/tasks?view=inbox&item={{.ID}}" class="min-w-0 flex-1">
+          <p class="truncate text-[13px] text-muted">{{.Title}}</p>
+          <p class="truncate text-[12px] text-faint">{{.Source}} · {{ago $.Loc .ReceivedAt}}{{with .Reason}} · {{.}}{{end}}</p>
+        </a>
+        <form method="post" action="/tasks/inbox/{{.ID}}/restore"><button class="btn-ghost h-7 px-2 text-[12px]" title="Put it back in the inbox">Restore</button></form>
       </li>
       {{end}}
     </ul>
@@ -274,7 +279,7 @@
 {{end}}
 
 {{define "inbox_item"}}{{$it := .Item}}
-<li class="px-2 py-3">
+<li class="rounded-md px-2 py-3 hover:bg-hover {{if and $.Open (eq $it.ID $.Open.ID)}}bg-selected{{end}}">
   <div class="mb-1 flex items-center gap-1.5 text-[12px] text-faint">
     <span class="truncate">{{$it.Source}}</span> · <span class="shrink-0">{{ago $.Loc $it.ReceivedAt}}</span>
     {{if $it.DueOn}}<span class="ml-auto shrink-0">due {{$it.DueOn.Format "Jan 2"}}</span>{{end}}
@@ -285,22 +290,15 @@
     <button class="shrink-0 cursor-pointer text-faint underline hover:text-ink" title="Make it a task of its own">Separate</button>
   </form>
   {{end}}
-  <form method="post" action="/tasks/inbox/{{$it.ID}}/accept" class="flex items-center gap-1">
-    <input name="title" value="{{$it.Title}}" aria-label="Task title" autocomplete="off"
-      class="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 font-medium outline-none hover:border-line focus:border-accent">
-    <button class="btn-icon text-accent" title="Accept as a task">{{icon "check"}}</button>
-    <button formaction="/tasks/inbox/{{$it.ID}}/discard" class="btn-icon hover:text-danger" title="Discard">{{icon "x"}}</button>
-  </form>
-  {{with $it.Details}}<p class="mt-1 line-clamp-3 px-1.5 text-[13px] whitespace-pre-line text-muted">{{.}}</p>{{end}}
-  {{with $it.Subtasks}}<ul class="mt-1 px-1.5 text-[13px] text-muted">{{range .}}<li class="flex items-center gap-1.5">{{icon "chevron-right" "size-3 text-faint"}}{{.}}</li>{{end}}</ul>{{end}}
+  <div class="flex items-center gap-1">
+    <a href="/tasks?view=inbox&item={{$it.ID}}" class="min-w-0 flex-1 px-1.5">
+      <span class="line-clamp-2 font-medium">{{$it.Title}}</span>
+      {{with $it.Details}}<span class="mt-0.5 line-clamp-2 text-[13px] text-muted">{{.}}</span>{{end}}
+    </a>
+    {{template "inbox_actions" $it}}
+  </div>
   {{with $it.Tags}}<div class="mt-1.5 flex flex-wrap gap-1 px-1.5">{{range .}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}</div>{{end}}
-  {{if eq $it.ParseState "failed"}}
-  <form method="post" action="/tasks/inbox/{{$it.ID}}/retry" class="mt-1.5 flex items-start gap-1.5 px-1.5 text-[12px] text-warn">
-    <span class="min-w-0 flex-1 break-words">AI couldn't read this, so the title is a guess: {{$it.ParseError}}</span>
-    <button class="shrink-0 cursor-pointer font-medium underline">Retry</button>
-  </form>
-  {{end}}
-  {{template "inbox_raw" $it}}
+  {{if eq $it.ParseState "failed"}}<p class="mt-1.5 px-1.5 text-[12px] text-warn">AI couldn't read this, so the title is a guess</p>{{end}}
   {{with $it.Children}}
   {{/* related items: accepting the item above adds them as its subtasks */}}
   <ul class="mt-2 ml-2 space-y-1.5 border-l border-line pl-2.5">
@@ -308,12 +306,11 @@
     <li>
       <div class="flex items-center gap-1 text-[13px]">
         {{icon "corner-down-right" "size-3 shrink-0 text-faint"}}
-        <span class="min-w-0 flex-1 truncate">{{.Title}}</span>
+        <a href="/tasks?view=inbox&item={{.ID}}" class="min-w-0 flex-1 truncate hover:underline">{{.Title}}</a>
         <span class="shrink-0 text-[12px] text-faint">{{ago $.Loc .ReceivedAt}}</span>
         <form method="post" action="/tasks/inbox/{{.ID}}/detach"><button class="btn-icon size-6" title="Make it a task of its own">{{icon "arrow-left"}}</button></form>
         <form method="post" action="/tasks/inbox/{{.ID}}/discard"><button class="btn-icon size-6 hover:text-danger" title="Discard">{{icon "x"}}</button></form>
       </div>
-      {{with .Details}}<p class="line-clamp-2 pl-4 text-[12px] whitespace-pre-line text-muted">{{.}}</p>{{end}}
     </li>
     {{end}}
   </ul>
@@ -321,11 +318,98 @@
 </li>
 {{end}}
 
-{{define "inbox_raw"}}
-<details class="mt-1 px-1.5 text-[12px] text-faint">
-  <summary class="cursor-pointer select-none">What was received</summary>
-  <pre class="mt-1 max-h-60 overflow-auto rounded-md bg-hover p-2 font-mono text-[11.5px] whitespace-pre-wrap break-all">{{.Raw}}</pre>
-</details>
+{{/* accept and discard for a top-level item; title is the edited title, if any */}}
+{{define "inbox_actions"}}
+<form method="post" action="/tasks/inbox/{{.ID}}/accept" class="flex shrink-0 items-center">
+  <button class="btn-icon text-accent" title="Accept as a task">{{icon "check"}}</button>
+  <button formaction="/tasks/inbox/{{.ID}}/discard" class="btn-icon hover:text-danger" title="Discard">{{icon "x"}}</button>
+</form>
+{{end}}
+
+{{/* an inbox item, opened: everything the model read, and what was received */}}
+{{define "inbox_pane"}}{{$it := .Item}}
+<section id="note-pane" class="flex min-w-0 flex-1 flex-col">
+  <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+    <a href="/tasks?view=inbox" class="btn-icon -ml-1.5 md:hidden" title="Back to the inbox">{{icon "arrow-left"}}</a>
+    <nav class="flex min-w-0 items-center gap-1 text-[13px] text-muted">
+      <a href="/tasks?view=inbox" class="truncate hover:text-ink">Inbox</a>
+      {{with $it.ParentItem}}{{icon "chevron-right" "size-3 text-faint"}}<a href="/tasks?view=inbox&item={{.}}" class="truncate hover:text-ink">Item it's under</a>{{end}}
+    </nav>
+    <div class="ml-auto flex items-center gap-2">
+      <button type="button" data-toggle-pane="list" class="btn-icon hidden md:inline-flex" title="Show or hide the list (Ctrl+\ hides both columns)">{{icon "list"}}</button>
+      {{template "sidebar-toggle"}}
+      {{template "drawer-button"}}
+    </div>
+  </header>
+
+  <div class="flex-1 overflow-y-auto">
+    <div class="px-5 pb-24 pt-6 sm:px-12 sm:pt-8">
+      <p class="mb-3 flex flex-wrap items-center gap-1.5 text-[13px] text-faint">
+        {{$it.Source}} · {{ago $.Loc $it.ReceivedAt}}{{if $it.DueOn}} · due {{$it.DueOn.Format "Jan 2"}}{{end}}
+      </p>
+
+      {{if $it.Noise}}
+      <form method="post" action="/tasks/inbox/{{$it.ID}}/restore" class="mb-4 flex items-center gap-2 rounded-md bg-hover px-3 py-2 text-[13px] text-muted">
+        <input type="hidden" name="item" value="{{$it.ID}}">
+        <span class="min-w-0 flex-1">Filtered out as needing no action{{with $it.Reason}}: {{.}}{{end}}</span>
+        <button class="btn-secondary h-7 px-2">Restore</button>
+      </form>
+      {{else if $it.ParentItem}}
+      <div class="mb-4 flex items-center gap-2 rounded-md bg-hover px-3 py-2 text-[13px] text-muted">
+        <span class="min-w-0 flex-1">Becomes a subtask when the <a href="/tasks?view=inbox&item={{$it.ParentItem}}" class="text-accent hover:underline">item it's under</a> is accepted.</span>
+        <form method="post" action="/tasks/inbox/{{$it.ID}}/detach"><input type="hidden" name="item" value="{{$it.ID}}"><button class="btn-secondary h-7 px-2">Make it its own task</button></form>
+        <form method="post" action="/tasks/inbox/{{$it.ID}}/discard"><button class="btn-icon hover:text-danger" title="Discard">{{icon "x"}}</button></form>
+      </div>
+      {{else if $it.ParentTask}}
+      <form method="post" action="/tasks/inbox/{{$it.ID}}/detach" class="mb-4 flex items-center gap-2 rounded-md bg-hover px-3 py-2 text-[13px] text-accent">
+        <input type="hidden" name="item" value="{{$it.ID}}">
+        {{icon "corner-down-right" "shrink-0"}}<span class="min-w-0 flex-1">Adds a subtask to “{{$it.ParentTask}}”</span>
+        <button class="btn-secondary h-7 px-2">Make it its own task</button>
+      </form>
+      {{end}}
+
+      {{if or $it.Noise $it.ParentItem}}
+      <h1 class="text-[24px] font-bold leading-tight tracking-tight sm:text-[28px]">{{$it.Title}}</h1>
+      {{else}}
+      <form method="post" action="/tasks/inbox/{{$it.ID}}/accept">
+        <input name="title" value="{{$it.Title}}" aria-label="Task title" autocomplete="off"
+          class="w-full bg-transparent text-[24px] font-bold leading-tight tracking-tight outline-none sm:text-[28px]">
+        <div class="mt-3 flex items-center gap-2">
+          <button class="btn-primary">{{icon "check"}} Accept</button>
+          <button formaction="/tasks/inbox/{{$it.ID}}/discard" class="btn-secondary hover:text-danger">{{icon "x"}} Discard</button>
+        </div>
+      </form>
+      {{end}}
+
+      {{if eq $it.ParseState "failed"}}
+      <form method="post" action="/tasks/inbox/{{$it.ID}}/retry" class="mt-4 flex items-start gap-2 text-[13px] text-warn">
+        <span class="min-w-0 flex-1 break-words">AI couldn't read this, so the title is a guess: {{$it.ParseError}}</span>
+        <button class="shrink-0 cursor-pointer font-medium underline">Retry</button>
+      </form>
+      {{end}}
+
+      {{with $it.Details}}<p class="mt-6 text-[14px] whitespace-pre-line">{{.}}</p>{{end}}
+      {{with $it.Tags}}<div class="mt-4 flex flex-wrap gap-1">{{range .}}<span class="chip px-1.5 py-0 text-[11px]">#{{.}}</span>{{end}}</div>{{end}}
+
+      {{if or $it.Subtasks $it.Children}}
+      <h2 class="section-label mt-8 mb-2 px-0">Subtasks</h2>
+      <ul class="space-y-1 text-[13.5px]">
+        {{range $it.Subtasks}}<li class="flex items-center gap-1.5">{{icon "chevron-right" "size-3 text-faint"}}{{.}}</li>{{end}}
+        {{range $it.Children}}
+        <li class="flex items-center gap-1.5">
+          {{icon "corner-down-right" "size-3 shrink-0 text-faint"}}
+          <a href="/tasks?view=inbox&item={{.ID}}" class="min-w-0 flex-1 truncate hover:underline">{{.Title}}</a>
+          <span class="shrink-0 text-[12px] text-faint">{{ago $.Loc .ReceivedAt}}</span>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+
+      <h2 class="section-label mt-8 mb-2 px-0">What was received</h2>
+      <pre class="overflow-auto rounded-md bg-hover p-3 font-mono text-[12px] whitespace-pre-wrap break-words">{{$it.Raw}}</pre>
+    </div>
+  </div>
+</section>
 {{end}}
 
 {{define "tasks_sidebar"}}

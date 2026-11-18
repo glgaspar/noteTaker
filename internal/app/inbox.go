@@ -75,6 +75,23 @@ type inbox struct {
 	Pending  int
 }
 
+// find returns the item with id, wherever it shows, or nil.
+func (in inbox) find(id int64) *inboxItem {
+	for _, list := range [][]inboxItem{in.Items, in.Filtered} {
+		for i := range list {
+			if list[i].ID == id {
+				return &list[i]
+			}
+			for j := range list[i].Children {
+				if list[i].Children[j].ID == id {
+					return &list[i].Children[j]
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // suggestion is a task read from what a source received.
 type suggestion struct {
 	ExternalID string // lets a sender resend an item without duplicating it
@@ -341,6 +358,11 @@ func (s *Server) detachItem(w http.ResponseWriter, r *http.Request) {
 func (s *Server) inboxUpdate(w http.ResponseWriter, r *http.Request, query string) {
 	if _, err := s.db.Exec(r.Context(), query, pathID(r, "id"), currentUser(r).ID); err != nil {
 		s.serverError(w, r, err)
+		return
+	}
+	// from the item's own pane, keep it open
+	if id := orZero(formID(r, "item")); id != 0 {
+		redirect(w, r, fmt.Sprintf("/tasks?view=inbox&item=%d", id))
 		return
 	}
 	redirect(w, r, "/tasks?view=inbox")

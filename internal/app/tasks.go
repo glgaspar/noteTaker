@@ -234,6 +234,14 @@ func (s *Server) tasksPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	if itemID := orZero(formID(r, "item")); view == "inbox" && itemID != 0 {
+		it := data["Inbox"].(inbox).find(itemID)
+		if it == nil {
+			s.fail(w, r, http.StatusNotFound, "")
+			return
+		}
+		data["Item"] = it
+	}
 	if taskID != 0 {
 		t, err := s.loadTask(ctx, user.ID, taskID)
 		if err != nil {
