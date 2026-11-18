@@ -74,7 +74,7 @@ Answer with JSON only, no markdown, exactly in this shape:
 - kind: "task" when the person has to do something about it (reply, decide, pay, fix, attend, review, deliver). "noise" when not: newsletters, marketing, automatic notifications and receipts, FYIs and copies that need no action, confirmations of things already done. When unsure, "task".
 - reason: for noise, a few words on why (for example "newsletter" or "automatic build notification"); otherwise "".
 - parent: when this is clearly part of, a follow-up to or a reply about one of the open tasks or inbox items listed below, its code (for example "T12" or "I40"); otherwise "".
-- title: the action to take, short and imperative (at most 80 characters), in the language of the message.
+- title: always, even for noise: the action to take, short and imperative (at most 80 characters), in the language of the message.
 - details: the context needed to do it (who, what, amounts, links, references), brief plain text. Empty if the title says it all.
 - due: a deadline as YYYY-MM-DD, only if the message states or clearly implies one; otherwise "".
 - tags: 0 to 3 short lowercase tags. Prefer the existing ones when they fit.
@@ -148,9 +148,6 @@ func (c LLMConfig) readTask(ctx context.Context, raw string, tc triageContext) (
 	rd := reading{suggestion: suggestion{Title: strings.TrimSpace(out.Title), Details: strings.TrimSpace(out.Details), DueOn: parseDue(out.Due)},
 		Tags: cleanList(out.Tags, 3, true), Subtasks: cleanList(out.Subtasks, 5, false),
 		Noise: strings.EqualFold(strings.TrimSpace(out.Kind), "noise"), Reason: strings.TrimSpace(out.Reason)}
-	if rd.Title == "" {
-		return reading{}, errors.New("the model gave no title")
-	}
 	if r := []rune(rd.Title); len(r) > 200 {
 		rd.Title = string(r[:200]) + "…"
 	}
@@ -308,7 +305,7 @@ func (s *Server) readItem(ctx context.Context, id, userID int64, raw string, sou
 	// stays top-level, so everything stays one level deep. Noise lets go of items under it.
 	_, err = s.db.Exec(ctx, `
 		WITH me AS (
-			UPDATE inbox_items SET parse_state = 'done', parse_error = '', title = @title, details = @details, due_on = @due,
+			UPDATE inbox_items SET parse_state = 'done', parse_error = '', title = coalesce(nullif(@title, ''), title), details = @details, due_on = @due,
 				tags = @tags, subtasks = @subtasks, verdict = @verdict, reason = @reason,
 				parent_task_id = (SELECT id FROM tasks WHERE id = @ptask AND user_id = @user AND parent_id IS NULL AND done_at IS NULL AND @verdict = 'task'),
 				parent_item_id = (SELECT p.id FROM inbox_items p WHERE p.id = @pitem AND p.id <> @id AND p.user_id = @user AND p.status = 'new'

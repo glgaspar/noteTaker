@@ -175,6 +175,8 @@ func TestInboxTriage(t *testing.T) {
 	var invoice, annTask, benTask int64
 	llm := newFakeLLM(t, func(user string) (int, string) {
 		switch {
+		case strings.Contains(user, "webinar"): // models tend to leave the title out of noise
+			return 200, `{"kind": "noise", "reason": "marketing"}`
 		case strings.Contains(user, "newsletter"):
 			return 200, `{"kind": "noise", "reason": "newsletter", "title": "Read the weekly newsletter"}`
 		case strings.Contains(user, "Re: invoice 77"):
@@ -204,6 +206,9 @@ func TestInboxTriage(t *testing.T) {
 		}
 		return dbInt(t, `SELECT max(id) FROM inbox_items`)
 	}
+	if state, title := itemState(t, arrive("Join our webinar")); state != "done" || title != "Join our webinar" {
+		t.Errorf("noise without a title: %s %q, want done with the guessed title", state, title)
+	}
 	news := arrive("The weekly newsletter is here")
 	invoice = arrive("Please pay invoice 77")
 	reply := arrive("Re: invoice 77, we changed banks")
@@ -223,7 +228,7 @@ func TestInboxTriage(t *testing.T) {
 
 	// noise is filtered out: not counted, shown apart, restorable
 	body := ann.get("/tasks?view=inbox").body
-	if !strings.Contains(body, "1 filtered out") || !strings.Contains(body, "newsletter") {
+	if !strings.Contains(body, "2 filtered out") || !strings.Contains(body, "newsletter") {
 		t.Error("the filtered-out item should be listed apart with its reason")
 	}
 	if !strings.Contains(body, `3 to decide on`) {
@@ -261,7 +266,7 @@ func TestInboxTriage(t *testing.T) {
 	if n := dbInt(t, `SELECT count(*) FROM tasks WHERE parent_id = $1 AND title = 'Check the Safari case' AND details = 'on iOS'`, annTask); n != 1 {
 		t.Error("the Safari item should be a subtask of the login task")
 	}
-	if n := inboxCount(t, ann.ID); n != 0 {
+	if n := dbInt(t, `SELECT count(*) FROM inbox_items WHERE user_id = $1 AND status = 'new' AND verdict = 'task'`, ann.ID); n != 0 {
 		t.Errorf("%d items left after accepting all", n)
 	}
 
